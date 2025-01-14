@@ -18,9 +18,9 @@ use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, Syst
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    let mut sys = System::new_all();
 
     enable_raw_mode().unwrap();
-    let mut sys = System::new_all();
     let mut stdout = std::io::stdout();
     stdout.execute(EnterAlternateScreen).unwrap();
     let backend = CrosstermBackend::new(stdout);
@@ -72,22 +72,25 @@ impl App {
     }
 
     fn draw(&self, frame: &mut Frame, sys: &System) {
-        let reson_layout = prepare_layout(frame);
+        let app_layout = prepare_layout(frame);
 
         let cpu_barchart = create_cpu_barchart(sys);
-        frame.render_widget(cpu_barchart, reson_layout.inner_layout[0]);
-
-        let processes_widget = create_processes_widget(sys);
-        frame.render_widget(processes_widget, reson_layout.inner_layout[1]);
+        frame.render_widget(cpu_barchart, app_layout.outer_layout[0]);
 
         let memory_gauge = create_memory_gauge(sys);
-        frame.render_widget(memory_gauge, reson_layout.outer_layout[1]);
+        frame.render_widget(memory_gauge, app_layout.inner_layout[0]);
+
+        let processes_widget = create_processes_widget(sys);
+        frame.render_widget(processes_widget, app_layout.inner_layout[1]);
 
         let disk_barchart = create_disk_barchart(sys);
-        frame.render_widget(disk_barchart, reson_layout.outer_layout[2]);
+        frame.render_widget(disk_barchart, app_layout.outer_layout[2]);
 
         let network_widget = create_network_widget(sys);
-        frame.render_widget(network_widget, reson_layout.outer_layout[3]);
+        frame.render_widget(network_widget, app_layout.outer_layout[3]);
+
+        let exit_message = Block::default().title("Click 'q' to exit.");
+        frame.render_widget(exit_message, app_layout.outer_layout[4]);
     }
 }
 
@@ -189,7 +192,7 @@ fn create_cpu_barchart(sys: &System) -> BarChart<'_> {
             let cpu_usage = cpu.cpu_usage() as u64;
             Bar::default()
                 .value(cpu_usage)
-                .label(Line::from(format!("CPU {}", i)))
+                .label(Line::from(format!("CPU {}", i + 1)))
                 .text_value(format!("{cpu_usage:>3}%"))
                 .style(Style::default().fg(Color::Green))
                 .value_style(Style::default().fg(Color::Black).bg(Color::Green))
@@ -199,7 +202,7 @@ fn create_cpu_barchart(sys: &System) -> BarChart<'_> {
     BarChart::default()
         .block(Block::default().title("CPU Usage").borders(Borders::all()))
         .data(BarGroup::default().bars(&cpu_data))
-        .bar_width(5)
+        .bar_width(7)
         .bar_gap(2)
 }
 
@@ -213,10 +216,11 @@ fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Percentage(30), // CPU + Top Processes
-            Constraint::Percentage(10), // Memory
-            Constraint::Percentage(20), // Disk
+            Constraint::Percentage(30), // CPU
+            Constraint::Percentage(30), // Memory + Top Processes
+            Constraint::Percentage(18), // Disk
             Constraint::Percentage(20), // Network
+            Constraint::Percentage(2),  // Exit Message
         ])
         .split(f.size());
 
@@ -224,7 +228,7 @@ fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
         .direction(Direction::Horizontal)
         .margin(1)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(outer_layout[0]);
+        .split(outer_layout[1]);
 
     AppLayout {
         outer_layout,
