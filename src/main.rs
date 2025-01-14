@@ -1,7 +1,8 @@
-use std::{rc::Rc, thread, time::Duration};
+use std::{io::Stdout, rc::Rc, thread, time::Duration};
 
+use color_eyre::{eyre::Ok, Result};
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -11,11 +12,13 @@ use ratatui::{
     style::{Color, Style},
     text::Line,
     widgets::{Bar, BarChart, BarGroup, Block, Borders, Gauge, List, ListItem, Paragraph},
-    Terminal,
+    Frame, Terminal,
 };
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
 
-fn main() {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     enable_raw_mode().unwrap();
     let mut sys = System::new_all();
     let mut stdout = std::io::stdout();
@@ -23,48 +26,69 @@ fn main() {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let tick_rate = Duration::from_millis(1000);
-
-    loop {
-        sys.refresh_all();
-
-        terminal
-            .draw(|f| {
-                let reson_layout = prepare_layout(f);
-
-                let cpu_barchart = create_cpu_barchart(&sys);
-                f.render_widget(cpu_barchart, reson_layout.inner_layout[0]);
-
-                let processes_widget = create_processes_widget(&sys);
-                f.render_widget(processes_widget, reson_layout.inner_layout[1]);
-
-                let memory_gauge = create_memory_gauge(&sys);
-                f.render_widget(memory_gauge, reson_layout.outer_layout[1]);
-
-                let disk_barchart = create_disk_barchart(&sys);
-                f.render_widget(disk_barchart, reson_layout.outer_layout[2]);
-
-                let network_widget = create_network_widget(&sys);
-                f.render_widget(network_widget, reson_layout.outer_layout[3]);
-            })
-            .unwrap();
-
-        if event::poll(tick_rate).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                if key.code == KeyCode::Char('q') {
-                    break;
-                }
-            }
-        }
-
-        thread::sleep(Duration::from_secs(1));
-    }
+    App::new().run(&mut terminal, &mut sys)?;
 
     disable_raw_mode().unwrap();
     terminal
         .backend_mut()
         .execute(LeaveAlternateScreen)
         .unwrap();
+    Ok(())
+}
+
+struct App {
+    should_exit: bool,
+}
+
+impl App {
+    fn new() -> Self {
+        Self { should_exit: false }
+    }
+
+    fn run(
+        mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+        sys: &mut System,
+    ) -> Result<()> {
+        while !self.should_exit {
+            sys.refresh_all();
+            terminal.draw(|frame| self.draw(frame, sys))?;
+            self.handle_events()?;
+            thread::sleep(Duration::from_millis(500));
+        }
+
+        Ok(())
+    }
+
+    fn handle_events(&mut self) -> Result<()> {
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
+                    self.should_exit = true;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn draw(&self, frame: &mut Frame, sys: &System) {
+        let reson_layout = prepare_layout(frame);
+
+        let cpu_barchart = create_cpu_barchart(sys);
+        frame.render_widget(cpu_barchart, reson_layout.inner_layout[0]);
+
+        let processes_widget = create_processes_widget(sys);
+        frame.render_widget(processes_widget, reson_layout.inner_layout[1]);
+
+        let memory_gauge = create_memory_gauge(sys);
+        frame.render_widget(memory_gauge, reson_layout.outer_layout[1]);
+
+        let disk_barchart = create_disk_barchart(sys);
+        frame.render_widget(disk_barchart, reson_layout.outer_layout[2]);
+
+        let network_widget = create_network_widget(sys);
+        frame.render_widget(network_widget, reson_layout.outer_layout[3]);
+    }
 }
 
 fn create_network_widget(sys: &System) -> Paragraph<'_> {
