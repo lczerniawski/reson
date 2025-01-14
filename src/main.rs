@@ -1,4 +1,4 @@
-use std::{thread, time::Duration};
+use std::{rc::Rc, thread, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -6,10 +6,11 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     prelude::CrosstermBackend,
     style::{Color, Style},
-    widgets::{BarChart, Block, Borders, Gauge, List, ListItem, Paragraph},
+    text::Line,
+    widgets::{Bar, BarChart, BarGroup, Block, Borders, Gauge, List, ListItem, Paragraph},
     Terminal,
 };
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
@@ -29,145 +30,22 @@ fn main() {
 
         terminal
             .draw(|f| {
-                let outer_layout = Layout::default()
-                    .direction(Direction::Vertical)
-                    .margin(1)
-                    .constraints(
-                        [
-                            Constraint::Percentage(30), // CPU + Top Processes
-                            Constraint::Percentage(10), // Memory
-                            Constraint::Percentage(20), // Disk
-                            Constraint::Percentage(20), // Network
-                        ]
-                        .as_ref(),
-                    )
-                    .split(f.size());
+                let reson_layout = prepare_layout(f);
 
-                let inner_layout = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .margin(1)
-                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(outer_layout[0]);
+                let cpu_barchart = create_cpu_barchart(&sys);
+                f.render_widget(cpu_barchart, reson_layout.inner_layout[0]);
 
-                let cpu_data: Vec<(String, u64)> = sys
-                    .cpus()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cpu)| {
-                        (
-                            format!("CPU {}", i).as_str().to_string(),
-                            cpu.cpu_usage() as u64,
-                        )
-                    })
-                    .collect();
+                let processes_widget = create_processes_widget(&sys);
+                f.render_widget(processes_widget, reson_layout.inner_layout[1]);
 
-                let cpu_chart_data: Vec<(&str, u64)> = cpu_data
-                    .iter()
-                    .map(|(cpu, usage)| (cpu.as_str(), *usage))
-                    .collect();
+                let memory_gauge = create_memory_gauge(&sys);
+                f.render_widget(memory_gauge, reson_layout.outer_layout[1]);
 
-                let cpu_barchart = BarChart::default()
-                    .block(Block::default().title("CPU Usage").borders(Borders::all()))
-                    .data(&cpu_chart_data)
-                    .bar_width(5)
-                    .bar_gap(2)
-                    .style(Style::default().fg(Color::Green))
-                    .value_style(Style::default().fg(Color::White));
+                let disk_barchart = create_disk_barchart(&sys);
+                f.render_widget(disk_barchart, reson_layout.outer_layout[2]);
 
-                f.render_widget(cpu_barchart, inner_layout[0]);
-
-                let mut processes: Vec<_> = sys.processes().values().collect();
-                processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
-
-                let top_processes: Vec<ListItem> = processes
-                    .iter()
-                    .take(10)
-                    .map(|process| {
-                        ListItem::new(format!(
-                            "{:<30} CPU: {:>5.1}% MEM: {:>5.1}MB",
-                            process.name(),
-                            process.cpu_usage(),
-                            process.memory() / 1024 / 1024
-                        ))
-                    })
-                    .collect();
-
-                let process_widget = List::new(top_processes)
-                    .block(
-                        Block::default()
-                            .title("Top Processes")
-                            .borders(Borders::all()),
-                    )
-                    .style(Style::default().fg(Color::Cyan));
-
-                f.render_widget(process_widget, inner_layout[1]);
-
-                let total_memory = sys.total_memory() as f64 / 1024.0 / 1024.0;
-                let used_memory =
-                    (sys.total_memory() - sys.available_memory()) as f64 / 1024.0 / 1024.0;
-                let memory_percentage = (used_memory / total_memory) * 100.0;
-
-                let memory_gauge = Gauge::default()
-                    .block(
-                        Block::default()
-                            .title("Memory Usage")
-                            .borders(Borders::all()),
-                    )
-                    .gauge_style(Style::default().fg(Color::Blue))
-                    .ratio(memory_percentage / 100.0);
-
-                f.render_widget(memory_gauge, outer_layout[1]);
-
-                let disk_data: Vec<(String, u64)> = sys
-                    .disks()
-                    .iter()
-                    .map(|disk| {
-                        let used = (disk.total_space() - disk.available_space()) as f64;
-                        let total = disk.total_space() as f64;
-                        let usage = (used / total * 100.0) as u64;
-                        (disk.name().to_string_lossy().to_string(), usage)
-                    })
-                    .collect();
-
-                let disk_chart_data: Vec<(&str, u64)> = disk_data
-                    .iter()
-                    .map(|(name, usage)| (name.as_str(), *usage))
-                    .collect();
-
-                let disk_chart = BarChart::default()
-                    .block(
-                        Block::default()
-                            .title("Disk Usage %")
-                            .borders(Borders::all()),
-                    )
-                    .data(&disk_chart_data)
-                    .bar_width(7)
-                    .bar_gap(3)
-                    .style(Style::default().fg(Color::Yellow));
-
-                f.render_widget(disk_chart, outer_layout[2]);
-
-                let network_text = sys
-                    .networks()
-                    .iter()
-                    .map(|(network, data)| {
-                        format!(
-                            "{}: ↑ {} KB/s ↓ {} KB/",
-                            network,
-                            data.transmitted() / 1024,
-                            data.received() / 1024
-                        )
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                let network_widget = Paragraph::new(network_text).block(
-                    Block::default()
-                        .title("Network Usage")
-                        .borders(Borders::all()),
-                );
-
-                f.render_widget(network_widget, outer_layout[3]);
+                let network_widget = create_network_widget(&sys);
+                f.render_widget(network_widget, reson_layout.outer_layout[3]);
             })
             .unwrap();
 
@@ -187,4 +65,145 @@ fn main() {
         .backend_mut()
         .execute(LeaveAlternateScreen)
         .unwrap();
+}
+
+fn create_network_widget(sys: &System) -> Paragraph<'_> {
+    let network_text = sys
+        .networks()
+        .iter()
+        .map(|(network, data)| {
+            format!(
+                "{}: ↑ {} KB/s ↓ {} KB/",
+                network,
+                data.transmitted() / 1024,
+                data.received() / 1024
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    Paragraph::new(network_text).block(
+        Block::default()
+            .title("Network Usage")
+            .borders(Borders::all()),
+    )
+}
+
+fn create_disk_barchart(sys: &System) -> BarChart<'_> {
+    let disk_data: Vec<Bar> = sys
+        .disks()
+        .iter()
+        .map(|disk| {
+            let used = (disk.total_space() - disk.available_space()) as f64;
+            let total = disk.total_space() as f64;
+            let usage = (used / total * 100.0) as u64;
+            Bar::default()
+                .value(usage)
+                .label(Line::from(format!("{}", disk.name().to_string_lossy())))
+                .style(Style::default().fg(Color::Yellow))
+        })
+        .collect();
+
+    BarChart::default()
+        .block(
+            Block::default()
+                .title("Disk Usage %")
+                .borders(Borders::all()),
+        )
+        .data(BarGroup::default().bars(&disk_data))
+        .bar_width(7)
+        .bar_gap(3)
+}
+
+fn create_memory_gauge(sys: &System) -> Gauge<'_> {
+    let total_memory = sys.total_memory() as f64 / 1024.0 / 1024.0;
+    let used_memory = (sys.total_memory() - sys.available_memory()) as f64 / 1024.0 / 1024.0;
+    let memory_percentage = (used_memory / total_memory) * 100.0;
+
+    Gauge::default()
+        .block(
+            Block::default()
+                .title("Memory Usage")
+                .borders(Borders::all()),
+        )
+        .gauge_style(Style::default().fg(Color::Blue))
+        .ratio(memory_percentage / 100.0)
+}
+
+fn create_processes_widget(sys: &System) -> List<'_> {
+    let mut processes: Vec<_> = sys.processes().values().collect();
+    processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
+
+    let top_processes: Vec<ListItem> = processes
+        .iter()
+        .take(10)
+        .map(|process| {
+            ListItem::new(format!(
+                "{:<30} CPU: {:>5.1}% MEM: {:>5.1}MB",
+                process.name(),
+                process.cpu_usage(),
+                process.memory() / 1024 / 1024
+            ))
+        })
+        .collect();
+
+    List::new(top_processes)
+        .block(
+            Block::default()
+                .title("Top Processes")
+                .borders(Borders::all()),
+        )
+        .style(Style::default().fg(Color::Cyan))
+}
+
+fn create_cpu_barchart(sys: &System) -> BarChart<'_> {
+    let cpu_data: Vec<Bar> = sys
+        .cpus()
+        .iter()
+        .enumerate()
+        .map(|(i, cpu)| {
+            let cpu_usage = cpu.cpu_usage() as u64;
+            Bar::default()
+                .value(cpu_usage)
+                .label(Line::from(format!("CPU {}", i)))
+                .text_value(format!("{cpu_usage:>3}%"))
+                .style(Style::default().fg(Color::Green))
+                .value_style(Style::default().fg(Color::Black).bg(Color::Green))
+        })
+        .collect();
+
+    BarChart::default()
+        .block(Block::default().title("CPU Usage").borders(Borders::all()))
+        .data(BarGroup::default().bars(&cpu_data))
+        .bar_width(5)
+        .bar_gap(2)
+}
+
+struct AppLayout {
+    outer_layout: Rc<[Rect]>,
+    inner_layout: Rc<[Rect]>,
+}
+
+fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
+    let outer_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Percentage(30), // CPU + Top Processes
+            Constraint::Percentage(10), // Memory
+            Constraint::Percentage(20), // Disk
+            Constraint::Percentage(20), // Network
+        ])
+        .split(f.size());
+
+    let inner_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .margin(1)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(outer_layout[0]);
+
+    AppLayout {
+        outer_layout,
+        inner_layout,
+    }
 }
