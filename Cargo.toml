@@ -1,0 +1,9 @@
+[package]
+name = "reson"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sysinfo = "0.29.0"
+ratatui = "0.24.0"
+crossterm = "0.27"
