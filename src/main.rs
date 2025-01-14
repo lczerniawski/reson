@@ -29,20 +29,25 @@ fn main() {
 
         terminal
             .draw(|f| {
-                let chunks = Layout::default()
+                let outer_layout = Layout::default()
                     .direction(Direction::Vertical)
                     .margin(1)
                     .constraints(
                         [
-                            Constraint::Length(10), // CPU
-                            Constraint::Length(3),  // Memory
-                            Constraint::Length(5),  // Disk
-                            Constraint::Length(10), // Network
-                            Constraint::Length(10), // Top Processes
+                            Constraint::Percentage(30), // CPU + Top Processes
+                            Constraint::Percentage(10), // Memory
+                            Constraint::Percentage(20), // Disk
+                            Constraint::Percentage(20), // Network
                         ]
                         .as_ref(),
                     )
                     .split(f.size());
+
+                let inner_layout = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .margin(1)
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(outer_layout[0]);
 
                 let cpu_data: Vec<(String, u64)> = sys
                     .cpus()
@@ -64,12 +69,38 @@ fn main() {
                 let cpu_barchart = BarChart::default()
                     .block(Block::default().title("CPU Usage").borders(Borders::all()))
                     .data(&cpu_chart_data)
-                    .bar_width(3)
-                    .bar_gap(1)
+                    .bar_width(5)
+                    .bar_gap(2)
                     .style(Style::default().fg(Color::Green))
-                    .value_style(Style::default().fg(Color::Black));
+                    .value_style(Style::default().fg(Color::White));
 
-                f.render_widget(cpu_barchart, chunks[0]);
+                f.render_widget(cpu_barchart, inner_layout[0]);
+
+                let mut processes: Vec<_> = sys.processes().values().collect();
+                processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
+
+                let top_processes: Vec<ListItem> = processes
+                    .iter()
+                    .take(10)
+                    .map(|process| {
+                        ListItem::new(format!(
+                            "{:<30} CPU: {:>5.1}% MEM: {:>5.1}MB",
+                            process.name(),
+                            process.cpu_usage(),
+                            process.memory() / 1024 / 1024
+                        ))
+                    })
+                    .collect();
+
+                let process_widget = List::new(top_processes)
+                    .block(
+                        Block::default()
+                            .title("Top Processes")
+                            .borders(Borders::all()),
+                    )
+                    .style(Style::default().fg(Color::Cyan));
+
+                f.render_widget(process_widget, inner_layout[1]);
 
                 let total_memory = sys.total_memory() as f64 / 1024.0 / 1024.0;
                 let used_memory =
@@ -85,7 +116,7 @@ fn main() {
                     .gauge_style(Style::default().fg(Color::Blue))
                     .ratio(memory_percentage / 100.0);
 
-                f.render_widget(memory_gauge, chunks[1]);
+                f.render_widget(memory_gauge, outer_layout[1]);
 
                 let disk_data: Vec<(String, u64)> = sys
                     .disks()
@@ -114,7 +145,7 @@ fn main() {
                     .bar_gap(3)
                     .style(Style::default().fg(Color::Yellow));
 
-                f.render_widget(disk_chart, chunks[2]);
+                f.render_widget(disk_chart, outer_layout[2]);
 
                 let network_text = sys
                     .networks()
@@ -136,33 +167,7 @@ fn main() {
                         .borders(Borders::all()),
                 );
 
-                f.render_widget(network_widget, chunks[3]);
-
-                let mut processes: Vec<_> = sys.processes().values().collect();
-                processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
-
-                let top_processes: Vec<ListItem> = processes
-                    .iter()
-                    .take(10)
-                    .map(|process| {
-                        ListItem::new(format!(
-                            "{:<30} CPU: {:>5.1}% MEM: {:>5.1}MB",
-                            process.name(),
-                            process.cpu_usage(),
-                            process.memory() / 1024 / 1024
-                        ))
-                    })
-                    .collect();
-
-                let process_widget = List::new(top_processes)
-                    .block(
-                        Block::default()
-                            .title("Top Processes")
-                            .borders(Borders::all()),
-                    )
-                    .style(Style::default().fg(Color::Cyan));
-
-                f.render_widget(process_widget, chunks[4]);
+                f.render_widget(network_widget, outer_layout[3]);
             })
             .unwrap();
 
