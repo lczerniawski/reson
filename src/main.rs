@@ -14,7 +14,7 @@ use ratatui::{
     widgets::{Bar, BarChart, BarGroup, Block, Borders, Gauge, List, ListItem, Paragraph},
     Frame, Terminal,
 };
-use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
+use sysinfo::{Cpu, CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -74,14 +74,15 @@ impl App {
     fn draw(&self, frame: &mut Frame, sys: &System) {
         let app_layout = prepare_layout(frame);
 
-        let cpu_barchart = create_cpu_barchart(sys);
-        frame.render_widget(cpu_barchart, app_layout.outer_layout[0]);
+        let top_cpu_barchart = create_top_cpu_barchart(sys);
+        frame.render_widget(top_cpu_barchart, app_layout.inner_layout[0]);
 
-        let memory_gauge = create_memory_gauge(sys);
-        frame.render_widget(memory_gauge, app_layout.inner_layout[0]);
+        let memory_gauges = create_memory_gauges(sys);
+        frame.render_widget(memory_gauges.main_memory_gauge, app_layout.memory_layout[0]);
+        frame.render_widget(memory_gauges.swap_gauge, app_layout.memory_layout[1]);
 
-        let processes_widget = create_processes_widget(sys);
-        frame.render_widget(processes_widget, app_layout.inner_layout[1]);
+        let top_processes_widget = create_top_processes_widget(sys);
+        frame.render_widget(top_processes_widget, app_layout.outer_layout[1]);
 
         let disk_barchart = create_disk_barchart(sys);
         frame.render_widget(disk_barchart, app_layout.outer_layout[2]);
@@ -142,22 +143,54 @@ fn create_disk_barchart(sys: &System) -> BarChart<'_> {
         .bar_gap(3)
 }
 
-fn create_memory_gauge(sys: &System) -> Gauge<'_> {
-    let total_memory = sys.total_memory() as f64 / 1024.0 / 1024.0;
-    let used_memory = (sys.total_memory() - sys.available_memory()) as f64 / 1024.0 / 1024.0;
-    let memory_percentage = (used_memory / total_memory) * 100.0;
+struct MemoryGauges<'a> {
+    main_memory_gauge: Gauge<'a>,
+    swap_gauge: Gauge<'a>,
+}
 
-    Gauge::default()
+fn create_memory_gauges(sys: &System) -> MemoryGauges {
+    let total_memory_gb = sys.total_memory() as f64 / 1024.0 / 1024.0;
+    let used_memory_gb = sys.used_memory() as f64 / 1024.0 / 1024.0;
+    let memory_percentage = (used_memory_gb / total_memory_gb) * 100.0;
+
+    let total_swap_gb = sys.total_swap() as f64 / 1024.0 / 1024.0;
+    let used_swap_gb = sys.used_swap() as f64 / 1024.0 / 1024.;
+    let swap_percentage = (used_swap_gb / total_swap_gb) * 100.0;
+
+    let memory_gauge = Gauge::default()
         .block(
             Block::default()
-                .title("Memory Usage")
+                .title(format!(
+                    "Memory Usage, Total: {} GB, Used: {} GB",
+                    total_memory_gb.round(),
+                    used_memory_gb.round(),
+                ))
                 .borders(Borders::all()),
         )
         .gauge_style(Style::default().fg(Color::Blue))
-        .ratio(memory_percentage / 100.0)
+        .style(Style::default().fg(Color::Blue))
+        .percent(memory_percentage as u16);
+
+    let swap_gauge = Gauge::default()
+        .block(
+            Block::default()
+                .title(format!(
+                    "Swap Usage, Total: {} GB, Used: {} GB",
+                    total_swap_gb, used_swap_gb
+                ))
+                .borders(Borders::all()),
+        )
+        .gauge_style(Style::default().fg(Color::LightMagenta))
+        .style(Style::default().fg(Color::LightMagenta))
+        .percent(swap_percentage as u16);
+
+    MemoryGauges {
+        main_memory_gauge: memory_gauge,
+        swap_gauge,
+    }
 }
 
-fn create_processes_widget(sys: &System) -> List<'_> {
+fn create_top_processes_widget(sys: &System) -> List<'_> {
     let mut processes: Vec<_> = sys.processes().values().collect();
     processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
 
@@ -177,38 +210,55 @@ fn create_processes_widget(sys: &System) -> List<'_> {
     List::new(top_processes)
         .block(
             Block::default()
-                .title("Top Processes")
+                .title("Top 10 Processes")
                 .borders(Borders::all()),
         )
         .style(Style::default().fg(Color::Cyan))
 }
 
-fn create_cpu_barchart(sys: &System) -> BarChart<'_> {
-    let cpu_data: Vec<Bar> = sys
+fn create_top_cpu_barchart(sys: &System) -> BarChart<'_> {
+    let mut cpus: Vec<(&Cpu, usize)> = sys
         .cpus()
         .iter()
         .enumerate()
-        .map(|(i, cpu)| {
+        .map(|(i, cpu)| (cpu, i + 1))
+        .collect();
+    cpus.sort_by(|a, b| b.0.cpu_usage().partial_cmp(&a.0.cpu_usage()).unwrap());
+
+    let cpu_data: Vec<Bar> = cpus
+        .iter()
+        .take(5)
+        .map(|(cpu, cpu_count)| {
             let cpu_usage = cpu.cpu_usage() as u64;
             Bar::default()
                 .value(cpu_usage)
-                .label(Line::from(format!("CPU {}", i + 1)))
+                .label(Line::from(format!("CPU {}", cpu_count)))
                 .text_value(format!("{cpu_usage:>3}%"))
-                .style(Style::default().fg(Color::Green))
                 .value_style(Style::default().fg(Color::Black).bg(Color::Green))
         })
         .collect();
 
+    let global_cpu_usage = sys.global_cpu_info().cpu_usage();
     BarChart::default()
-        .block(Block::default().title("CPU Usage").borders(Borders::all()))
+        .block(
+            Block::default()
+                .title(format!(
+                    "Top 5 CPU Usage, Global: {}%",
+                    global_cpu_usage.round()
+                ))
+                .borders(Borders::all()),
+        )
         .data(BarGroup::default().bars(&cpu_data))
+        .style(Style::default().fg(Color::Green))
         .bar_width(7)
         .bar_gap(2)
+        .max(100)
 }
 
 struct AppLayout {
     outer_layout: Rc<[Rect]>,
     inner_layout: Rc<[Rect]>,
+    memory_layout: Rc<[Rect]>,
 }
 
 fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
@@ -216,8 +266,8 @@ fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Percentage(30), // CPU
-            Constraint::Percentage(30), // Memory + Top Processes
+            Constraint::Percentage(30), // CPU + Memory
+            Constraint::Percentage(30), // Top Processes
             Constraint::Percentage(18), // Disk
             Constraint::Percentage(20), // Network
             Constraint::Percentage(2),  // Exit Message
@@ -228,10 +278,17 @@ fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
         .direction(Direction::Horizontal)
         .margin(1)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(outer_layout[1]);
+        .split(outer_layout[0]);
+
+    let memory_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner_layout[1]);
 
     AppLayout {
         outer_layout,
         inner_layout,
+        memory_layout,
     }
 }
