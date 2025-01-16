@@ -11,10 +11,12 @@ use ratatui::{
     prelude::CrosstermBackend,
     style::{Color, Style},
     text::Line,
-    widgets::{Bar, BarChart, BarGroup, Block, Borders, Gauge, List, ListItem, Paragraph},
+    widgets::{Bar, BarChart, BarGroup, Block, Borders, Gauge, Paragraph, Row, Table},
     Frame, Terminal,
 };
-use sysinfo::{Cpu, CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
+use sysinfo::{
+    Cpu, CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt, UserExt,
+};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -81,8 +83,8 @@ impl App {
         frame.render_widget(memory_gauges.main_memory_gauge, app_layout.memory_layout[0]);
         frame.render_widget(memory_gauges.swap_gauge, app_layout.memory_layout[1]);
 
-        let top_processes_widget = create_top_processes_widget(sys);
-        frame.render_widget(top_processes_widget, app_layout.outer_layout[1]);
+        let top_processes_table = create_top_processes_table(sys);
+        frame.render_widget(top_processes_table, app_layout.outer_layout[1]);
 
         let disk_barchart = create_disk_barchart(sys);
         frame.render_widget(disk_barchart, app_layout.outer_layout[2]);
@@ -190,30 +192,54 @@ fn create_memory_gauges(sys: &System) -> MemoryGauges {
     }
 }
 
-fn create_top_processes_widget(sys: &System) -> List<'_> {
+fn create_top_processes_table(sys: &System) -> Table<'_> {
     let mut processes: Vec<_> = sys.processes().values().collect();
     processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
 
-    let top_processes: Vec<ListItem> = processes
+    let header = Row::new(vec!["User", "PID", "CPU%", "MEM(MB)", "Time", "Command"])
+        .style(Style::default().fg(Color::Gray));
+
+    let rows: Vec<Row> = processes
         .iter()
         .take(10)
         .map(|process| {
-            ListItem::new(format!(
-                "{:<30} CPU: {:>5.1}% MEM: {:>5.1}MB",
-                process.name(),
-                process.cpu_usage(),
-                process.memory() / 1024 / 1024
-            ))
+            Row::new(vec![
+                process
+                    .user_id()
+                    .and_then(|id| sys.get_user_by_id(&id))
+                    .map(|user| user.name().to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                process.pid().to_string(),
+                format!("{:.1}", process.cpu_usage()),
+                format!("{}", process.memory() / 1024 / 1024),
+                format!(
+                    "{:02}:{:02}:{:02}",
+                    process.run_time() / 60 / 60,
+                    process.run_time() / 60 % 60,
+                    process.run_time() % 60
+                ),
+                process.name().to_string(),
+            ])
         })
         .collect();
 
-    List::new(top_processes)
+    Table::new(rows)
+        .header(header)
         .block(
             Block::default()
                 .title("Top 10 Processes")
                 .borders(Borders::all()),
         )
         .style(Style::default().fg(Color::Cyan))
+        .widths(&[
+            Constraint::Percentage(15), // User
+            Constraint::Percentage(10), // PID
+            Constraint::Percentage(10), // CPU%
+            Constraint::Percentage(10), // MEM
+            Constraint::Percentage(15), // Time
+            Constraint::Percentage(40), // Command
+        ])
+        .column_spacing(1)
 }
 
 fn create_top_cpu_barchart(sys: &System) -> BarChart<'_> {
