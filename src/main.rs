@@ -86,7 +86,7 @@ impl App {
         let top_processes_table = create_top_processes_table(sys);
         frame.render_widget(top_processes_table, app_layout.outer_layout[1]);
 
-        let disk_barchart = create_disk_barchart(sys);
+        let disk_barchart = create_top_disks_barchart(sys);
         frame.render_widget(disk_barchart, app_layout.outer_layout[2]);
 
         let network_widget = create_network_widget(sys);
@@ -119,30 +119,44 @@ fn create_network_widget(sys: &System) -> Paragraph<'_> {
     )
 }
 
-fn create_disk_barchart(sys: &System) -> BarChart<'_> {
-    let disk_data: Vec<Bar> = sys
-        .disks()
-        .iter()
-        .map(|disk| {
-            let used = (disk.total_space() - disk.available_space()) as f64;
-            let total = disk.total_space() as f64;
-            let usage = (used / total * 100.0) as u64;
-            Bar::default()
-                .value(usage)
-                .label(Line::from(format!("{}", disk.name().to_string_lossy())))
-                .style(Style::default().fg(Color::Yellow))
-        })
-        .collect();
+fn create_top_disks_barchart(sys: &System) -> Paragraph<'_> {
+    let mut disks: Vec<_> = sys.disks().iter().collect();
+    disks.sort_by(|a, b| {
+        b.available_space()
+            .partial_cmp(&a.available_space())
+            .unwrap()
+    });
 
-    BarChart::default()
-        .block(
-            Block::default()
-                .title("Disk Usage %")
-                .borders(Borders::all()),
-        )
-        .data(BarGroup::default().bars(&disk_data))
-        .bar_width(7)
-        .bar_gap(3)
+    let disk_data: String = disks
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(n, disk)| {
+            let used = disk.total_space() - disk.available_space();
+            let total = disk.total_space();
+            let usage_percentage = (used as f64 / total as f64 * 100.0) as u64;
+            let free_percentage = (disk.available_space() as f64 / total as f64 * 100.0) as u64;
+
+            format!(
+                "{}. {} [Free: {}%({} GB), Used: {}%({} GB), Total: {} GB]",
+                n + 1,
+                disk.name().to_string_lossy(),
+                free_percentage,
+                disk.available_space() / 1024 / 1024 / 1024,
+                usage_percentage,
+                used / 1024 / 1024 / 1024,
+                disk.total_space() / 1024 / 1024 / 1024
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    Paragraph::new(disk_data).block(
+        Block::default()
+            .title("Top 5 Disks Usage")
+            .style(Style::default().fg(Color::Yellow))
+            .borders(Borders::all()),
+    )
 }
 
 struct MemoryGauges<'a> {
