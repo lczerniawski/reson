@@ -56,7 +56,7 @@ impl App {
             sys.refresh_all();
             terminal.draw(|frame| self.draw(frame, sys))?;
             self.handle_events()?;
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(250));
         }
 
         Ok(())
@@ -89,7 +89,7 @@ impl App {
         let disk_barchart = create_top_disks_barchart(sys);
         frame.render_widget(disk_barchart, app_layout.outer_layout[2]);
 
-        let network_widget = create_network_widget(sys);
+        let network_widget = create_top_networks_widget(sys);
         frame.render_widget(network_widget, app_layout.outer_layout[3]);
 
         let exit_message = Block::default().title("Click 'q' to exit.");
@@ -97,24 +97,81 @@ impl App {
     }
 }
 
-fn create_network_widget(sys: &System) -> Paragraph<'_> {
-    let network_text = sys
-        .networks()
+fn format_bytes_per_second(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.2} MB/s", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{} KB/s", bytes / 1024)
+    }
+}
+
+struct TotalNetworkStats {
+    transmited_bytes: u64,
+    received_bytes: u64,
+    transmited_packets: u64,
+    received_packets: u64,
+}
+
+fn create_top_networks_widget(sys: &System) -> Paragraph<'_> {
+    let mut networks: Vec<_> = sys.networks().iter().collect();
+    networks.sort_by(|a, b| {
+        let a_transmited = a.1.transmitted();
+        let b_transmited = b.1.transmitted();
+
+        let a_received = a.1.received();
+        let b_received = b.1.received();
+
+        let a_combined = a_transmited + a_received;
+        let b_combined = b_transmited + b_received;
+
+        b_combined.partial_cmp(&a_combined).unwrap()
+    });
+
+    let network_text = networks
         .iter()
+        .take(5)
         .map(|(network, data)| {
             format!(
-                "{}: ↑ {} KB/s ↓ {} KB/",
+                "{}: ↑ {} KB/s ↓ {} KB/s | Packets: TX {} RX {} | MAC: {}",
                 network,
-                data.transmitted() / 1024,
-                data.received() / 1024
+                format_bytes_per_second(data.transmitted()),
+                format_bytes_per_second(data.received()),
+                data.packets_transmitted(),
+                data.packets_transmitted(),
+                data.mac_address()
             )
         })
         .collect::<Vec<String>>()
         .join("\n");
 
+    let total_stats = sys.networks().iter().fold(
+        TotalNetworkStats {
+            transmited_bytes: 0,
+            received_bytes: 0,
+            transmited_packets: 0,
+            received_packets: 0,
+        },
+        |mut stats, (_name, data)| {
+            stats.transmited_bytes += data.transmitted();
+            stats.received_bytes += data.received();
+            stats.transmited_packets += data.packets_transmitted();
+            stats.received_packets += data.packets_received();
+            stats
+        },
+    );
+
+    let title = format!(
+        "Top 5 Network Usage, Total: ↑ {} KB/s ↓ {} KB/s | Packets: TX {} RX {}",
+        format_bytes_per_second(total_stats.transmited_bytes),
+        format_bytes_per_second(total_stats.received_bytes),
+        total_stats.transmited_packets,
+        total_stats.received_packets
+    );
+
     Paragraph::new(network_text).block(
         Block::default()
-            .title("Network Usage")
+            .title(title)
+            .style(Style::default().fg(Color::LightRed))
             .borders(Borders::all()),
     )
 }
@@ -153,7 +210,7 @@ fn create_top_disks_barchart(sys: &System) -> Paragraph<'_> {
 
     Paragraph::new(disk_data).block(
         Block::default()
-            .title("Top 5 Disks Usage")
+            .title("Top 5 Disk Usage")
             .style(Style::default().fg(Color::Yellow))
             .borders(Borders::all()),
     )
@@ -177,7 +234,7 @@ fn create_memory_gauges(sys: &System) -> MemoryGauges {
         .block(
             Block::default()
                 .title(format!(
-                    "Memory Usage, Total: {} GB, Used: {} GB",
+                    "Memory Usage, Total: {} MB, Used: {} MB",
                     total_memory_gb.round(),
                     used_memory_gb.round(),
                 ))
@@ -191,7 +248,7 @@ fn create_memory_gauges(sys: &System) -> MemoryGauges {
         .block(
             Block::default()
                 .title(format!(
-                    "Swap Usage, Total: {} GB, Used: {} GB",
+                    "Swap Usage, Total: {} MB, Used: {} MB",
                     total_swap_gb, used_swap_gb
                 ))
                 .borders(Borders::all()),
@@ -208,7 +265,20 @@ fn create_memory_gauges(sys: &System) -> MemoryGauges {
 
 fn create_top_processes_table(sys: &System) -> Table<'_> {
     let mut processes: Vec<_> = sys.processes().values().collect();
-    processes.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap());
+
+    let total_memory = sys.total_memory() as f64;
+    processes.sort_by(|a, b| {
+        let a_cpu_score = a.cpu_usage() as f64;
+        let b_cpu_score = b.cpu_usage() as f64;
+
+        let a_mem_score = (a.memory() as f64 / total_memory) * 100.0;
+        let b_mem_score = (b.memory() as f64 / total_memory) * 100.0;
+
+        let a_combined = a_cpu_score + a_mem_score;
+        let b_combined = b_cpu_score + b_mem_score;
+
+        b_combined.partial_cmp(&a_combined).unwrap()
+    });
 
     let header = Row::new(vec!["User", "PID", "CPU%", "MEM(MB)", "Time", "Command"])
         .style(Style::default().fg(Color::Gray));
@@ -283,7 +353,7 @@ fn create_top_cpu_barchart(sys: &System) -> BarChart<'_> {
         .block(
             Block::default()
                 .title(format!(
-                    "Top 5 CPU Usage, Global: {}%",
+                    "Top 5 CPU Usage, Total: {}%",
                     global_cpu_usage.round()
                 ))
                 .borders(Borders::all()),
