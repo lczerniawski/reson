@@ -3,6 +3,14 @@ name = "reson"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "reson"
+path = "src/main.rs"
+
+[lib]
+name = "reson"
+path = "src/lib.rs"
+
 [dependencies]
 sysinfo = "0.29.0"
 ratatui = "0.24.0"
