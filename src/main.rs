@@ -11,18 +11,15 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     let mut sys = System::new_all();
 
-    enable_raw_mode().unwrap();
+    enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    stdout.execute(EnterAlternateScreen).unwrap();
+    stdout.execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).unwrap();
+    let mut terminal = Terminal::new(backend)?;
 
     App::new().run(&mut terminal, &mut sys)?;
 
-    disable_raw_mode().unwrap();
-    terminal
-        .backend_mut()
-        .execute(LeaveAlternateScreen)
-        .unwrap();
+    disable_raw_mode()?;
+    terminal.backend_mut().execute(LeaveAlternateScreen)?;
     Ok(())
 }

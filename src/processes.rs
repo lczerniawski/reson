@@ -19,7 +19,9 @@ pub fn create_top_processes_table(sys: &System) -> Table<'_> {
         let a_combined = a_cpu_score + a_mem_score;
         let b_combined = b_cpu_score + b_mem_score;
 
-        b_combined.partial_cmp(&a_combined).unwrap()
+        b_combined
+            .partial_cmp(&a_combined)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let header = Row::new(vec!["User", "PID", "CPU%", "MEM(MB)", "Time", "Command"])

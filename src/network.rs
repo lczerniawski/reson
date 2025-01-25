@@ -32,7 +32,9 @@ pub fn create_top_networks_widget(sys: &System) -> Paragraph<'_> {
         let a_combined = a_transmited + a_received;
         let b_combined = b_transmited + b_received;
 
-        b_combined.partial_cmp(&a_combined).unwrap()
+        b_combined
+            .partial_cmp(&a_combined)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let network_text = networks

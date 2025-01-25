@@ -9,7 +9,7 @@ pub fn create_top_disks_barchart(sys: &System) -> Paragraph<'_> {
     disks.sort_by(|a, b| {
         b.available_space()
             .partial_cmp(&a.available_space())
-            .unwrap()
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let disk_data: String = disks

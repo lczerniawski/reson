@@ -12,7 +12,11 @@ pub fn create_top_cpu_barchart(sys: &System) -> BarChart<'_> {
         .enumerate()
         .map(|(i, cpu)| (cpu, i + 1))
         .collect();
-    cpus.sort_by(|a, b| b.0.cpu_usage().partial_cmp(&a.0.cpu_usage()).unwrap());
+    cpus.sort_by(|a, b| {
+        b.0.cpu_usage()
+            .partial_cmp(&a.0.cpu_usage())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let cpu_data: Vec<Bar> = cpus
         .iter()
