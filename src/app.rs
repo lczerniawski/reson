@@ -40,7 +40,7 @@ enum SelectedTab {
     #[strum(to_string = "Disk Details")]
     DiskDetails,
 
-    #[strum(to_string = "Processess Details")]
+    #[strum(to_string = "Processes Details")]
     ProcessessDetails,
 
     #[strum(to_string = "Network Details")]
@@ -136,9 +136,9 @@ impl App {
         let selected_tab_index = self.selected_tab as usize;
         let tabs_widget = Tabs::new(titles)
             .select(selected_tab_index)
-            .divider(" ")
-            .style(Style::default().fg(Color::Cyan))
-            .highlight_style(Style::default().fg(Color::Gray).bg(Color::Red));
+            .divider("|")
+            .style(Style::default().fg(Color::Blue))
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::Blue));
         frame.render_widget(tabs_widget, header_area);
     }
 
