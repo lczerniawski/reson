@@ -16,3 +16,4 @@ sysinfo = "0.29.0"
 ratatui = "0.24.0"
 crossterm = "0.27"
 color-eyre = "0.6"
+strum = { version = "0.26", features = ["derive"] }
