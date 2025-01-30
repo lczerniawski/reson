@@ -7,7 +7,8 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 use reson::App;
 use sysinfo::{System, SystemExt};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
     let mut sys = System::new_all();
 
@@ -17,7 +18,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    App::new().run(&mut terminal, &mut sys)?;
+    App::new().run(&mut terminal, &mut sys).await?;
 
     disable_raw_mode()?;
     terminal.backend_mut().execute(LeaveAlternateScreen)?;

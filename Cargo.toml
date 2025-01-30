@@ -17,3 +17,4 @@ ratatui = "0.24.0"
 crossterm = "0.27"
 color-eyre = "0.6"
 strum = { version = "0.26", features = ["derive"] }
+tokio = { version = "1.43", features = ["full"] }

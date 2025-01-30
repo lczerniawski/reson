@@ -1,4 +1,8 @@
-use std::{io::Stdout, thread, time::Duration};
+use std::{
+    io::Stdout,
+    sync::mpsc::{self, Receiver, Sender},
+    time::Duration,
+};
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
 use color_eyre::{eyre::Ok, Result};
@@ -9,16 +13,19 @@ use ratatui::{
     prelude::CrosstermBackend,
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Tabs},
+    widgets::{Block, ScrollbarState, Tabs},
     Frame, Terminal,
 };
 use sysinfo::{System, SystemExt};
+use tokio::time::interval;
 
-use crate::ui::{prepare_layout, render_summary_tab, AppLayout};
+use crate::ui::{prepare_layout, render_cpu_details_tab, render_summary_tab, AppLayout};
 
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
+    scrollbar_state: ScrollbarState,
+    scrollbar_pos: usize,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +54,12 @@ enum SelectedTab {
     NetworkDetails,
 }
 
+#[derive(Debug)]
+enum KeyboardMessage {
+    KeyPress(KeyCode),
+    Quit,
+}
+
 impl SelectedTab {
     fn next(self) -> Self {
         let current_index = self as usize;
@@ -70,49 +83,77 @@ impl App {
         Self {
             state: AppState::Running,
             selected_tab: SelectedTab::Summary,
+            scrollbar_state: ScrollbarState::new(0),
+            scrollbar_pos: 0,
         }
     }
 
-    pub fn run(
+    pub async fn run(
         mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         sys: &mut System,
     ) -> Result<()> {
+        let (tx, rx) = mpsc::channel::<KeyboardMessage>();
+
+        let input_handler = tokio::spawn(async move {
+            read_input_events(tx).await;
+        });
+
+        // Create a ticker for the main render loop
+        let mut render_ticker = interval(Duration::from_millis(500));
+
+        // Main event loop
         while self.state == AppState::Running {
+            render_ticker.tick().await;
+
             sys.refresh_all();
             terminal.draw(|frame| self.draw(frame, sys))?;
-            self.handle_events()?;
-            thread::sleep(Duration::from_millis(250));
+            self.handle_events(&rx);
         }
 
+        // Clean up
+        input_handler.abort();
         Ok(())
     }
 
-    fn handle_events(&mut self) -> Result<()> {
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
-                        KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
-                        KeyCode::Char('q') | KeyCode::Esc => self.quit(),
-                        _ => {}
-                    }
-                }
+    fn handle_events(&mut self, rx: &Receiver<KeyboardMessage>) {
+        while let Result::Ok(message) = rx.try_recv() {
+            match message {
+                KeyboardMessage::KeyPress(code) => match code {
+                    KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
+                    KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
+                    KeyCode::Char('j') | KeyCode::Down => self.scroll_down(),
+                    KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
+                    _ => {}
+                },
+                KeyboardMessage::Quit => self.quit(),
             }
         }
-        Ok(())
     }
 
-    pub fn next_tab(&mut self) {
+    fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
+        self.scrollbar_pos = 0;
+        self.scrollbar_state = self.scrollbar_state.position(0);
     }
 
-    pub fn previous_tab(&mut self) {
+    fn previous_tab(&mut self) {
         self.selected_tab = self.selected_tab.previous();
+        self.scrollbar_pos = 0;
+        self.scrollbar_state = self.scrollbar_state.position(0);
     }
 
-    pub fn quit(&mut self) {
+    fn scroll_down(&mut self) {
+        self.scrollbar_pos = self.scrollbar_pos.saturating_add(1);
+        self.scrollbar_state = self.scrollbar_state.position(self.scrollbar_pos);
+    }
+
+    fn scroll_up(&mut self) {
+        self.scrollbar_pos = self.scrollbar_pos.saturating_sub(1);
+        self.scrollbar_state = self.scrollbar_state.position(self.scrollbar_pos);
+    }
+
+    fn quit(&mut self) {
         self.state = AppState::Exiting;
     }
 
@@ -127,6 +168,9 @@ impl App {
     fn render_selected_tab(&self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
         match self.selected_tab {
             SelectedTab::Summary => render_summary_tab(frame, sys, &app_layout.summary_tab_layout),
+            SelectedTab::CpuDetails => {
+                render_cpu_details_tab(frame, sys, &app_layout.cpu_details_tab_layout)
+            }
             _ => (),
         }
     }
@@ -144,8 +188,30 @@ impl App {
 
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
         let footer = Block::default()
-            .title("◄ ► or h l to change tab | Press q to quit")
+            .title("◄ ► or h l to change tab | ▲ ▼ or j k to scroll | Press q to quit")
             .title_alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
+    }
+}
+
+async fn read_input_events(tx: Sender<KeyboardMessage>) {
+    let mut ticker = interval(Duration::from_millis(50));
+
+    loop {
+        ticker.tick().await;
+
+        while let Result::Ok(true) = event::poll(Duration::ZERO) {
+            if let Result::Ok(Event::Key(key)) = event::read() {
+                if key.kind == KeyEventKind::Press {
+                    let msg = match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => KeyboardMessage::Quit,
+                        code => KeyboardMessage::KeyPress(code),
+                    };
+                    if tx.send(msg).is_err() {
+                        return;
+                    }
+                }
+            }
+        }
     }
 }
