@@ -1,8 +1,4 @@
-use std::{
-    io::Stdout,
-    sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
-};
+use std::{io::Stdout, time::Duration};
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
 use color_eyre::{eyre::Ok, Result};
@@ -17,7 +13,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use sysinfo::{System, SystemExt};
-use tokio::time::interval;
+use tokio::{sync::mpsc::Sender, time::interval};
 
 use crate::ui::{prepare_layout, render_cpu_details_tab, render_summary_tab, AppLayout};
 
@@ -103,38 +99,39 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         sys: &mut System,
     ) -> Result<()> {
-        let (tx, rx) = mpsc::channel::<KeyboardMessage>();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<KeyboardMessage>(100);
 
         let input_handler = tokio::spawn(async move {
             read_input_events(tx).await;
         });
 
         let mut render_ticker = interval(Duration::from_millis(500));
-
         while self.state == AppState::Running {
-            render_ticker.tick().await;
-
-            sys.refresh_all();
-            terminal.draw(|frame| self.draw(frame, sys))?;
-            self.handle_events(&rx);
+            tokio::select! {
+                _ = render_ticker.tick() => {
+                    sys.refresh_all();
+                    terminal.draw(|frame| self.draw(frame, sys))?;
+                }
+                Some(message) = rx.recv() => {
+                    self.handle_events(&message);
+                }
+            }
         }
 
         input_handler.abort();
         Ok(())
     }
 
-    fn handle_events(&mut self, rx: &Receiver<KeyboardMessage>) {
-        while let Result::Ok(message) = rx.try_recv() {
-            match message {
-                KeyboardMessage::KeyPress(code) => match code {
-                    KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
-                    KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
-                    KeyCode::Char('j') | KeyCode::Down => self.scroll_down(),
-                    KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
-                    _ => {}
-                },
-                KeyboardMessage::Quit => self.quit(),
-            }
+    fn handle_events(&mut self, message: &KeyboardMessage) {
+        match message {
+            KeyboardMessage::KeyPress(code) => match code {
+                KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
+                KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
+                KeyCode::Char('j') | KeyCode::Down => self.scroll_down(),
+                KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
+                _ => {}
+            },
+            KeyboardMessage::Quit => self.quit(),
         }
     }
 
@@ -156,6 +153,7 @@ impl App {
             .pos
             .saturating_add(1)
             .clamp(0, self.scrollbar_state.content_length);
+
         self.scrollbar_state.state = self
             .scrollbar_state
             .state
@@ -231,21 +229,15 @@ impl App {
 }
 
 async fn read_input_events(tx: Sender<KeyboardMessage>) {
-    let mut ticker = interval(Duration::from_millis(50));
-
     loop {
-        ticker.tick().await;
-
-        while let Result::Ok(true) = event::poll(Duration::ZERO) {
-            if let Result::Ok(Event::Key(key)) = event::read() {
-                if key.kind == KeyEventKind::Press {
-                    let msg = match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => KeyboardMessage::Quit,
-                        code => KeyboardMessage::KeyPress(code),
-                    };
-                    if tx.send(msg).is_err() {
-                        return;
-                    }
+        if let Result::Ok(Event::Key(key)) = event::read() {
+            if key.kind == KeyEventKind::Press {
+                let msg = match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => KeyboardMessage::Quit,
+                    code => KeyboardMessage::KeyPress(code),
+                };
+                if tx.send(msg).await.is_err() {
+                    return;
                 }
             }
         }
