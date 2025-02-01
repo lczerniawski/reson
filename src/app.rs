@@ -40,17 +40,17 @@ enum SelectedTab {
     #[strum(to_string = "Summary")]
     Summary,
 
-    #[strum(to_string = "CPU Details")]
-    CpuDetails,
-
-    #[strum(to_string = "Disk Details")]
-    DiskDetails,
-
     #[strum(to_string = "Processes Details")]
     ProcessessDetails,
 
     #[strum(to_string = "Network Details")]
     NetworkDetails,
+
+    #[strum(to_string = "CPU Details")]
+    CpuDetails,
+
+    #[strum(to_string = "Disk Details")]
+    DiskDetails,
 }
 
 pub struct AppScrollbarState {
