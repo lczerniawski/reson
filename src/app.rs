@@ -105,11 +105,14 @@ impl App {
             read_input_events(tx).await;
         });
 
-        let mut render_ticker = interval(Duration::from_millis(500));
+        let mut draw_ticker = interval(Duration::from_millis(150));
+        let mut refresh_ticker = interval(Duration::from_millis(500));
         while self.state == AppState::Running {
             tokio::select! {
-                _ = render_ticker.tick() => {
+                _ = refresh_ticker.tick() => {
                     sys.refresh_all();
+                }
+                _ = draw_ticker.tick() => {
                     terminal.draw(|frame| self.draw(frame, sys))?;
                 }
                 Some(message) = rx.recv() => {
