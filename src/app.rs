@@ -9,11 +9,11 @@ use color_eyre::{eyre::Ok, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
 use ratatui::{
-    layout::{Alignment, Rect},
+    layout::{Alignment, Margin, Rect},
     prelude::CrosstermBackend,
     style::{Color, Style},
     text::Line,
-    widgets::{Block, ScrollbarState, Tabs},
+    widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs},
     Frame, Terminal,
 };
 use sysinfo::{System, SystemExt};
@@ -24,8 +24,7 @@ use crate::ui::{prepare_layout, render_cpu_details_tab, render_summary_tab, AppL
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
-    scrollbar_state: ScrollbarState,
-    scrollbar_pos: usize,
+    scrollbar_state: AppScrollbarState,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +51,13 @@ enum SelectedTab {
 
     #[strum(to_string = "Network Details")]
     NetworkDetails,
+}
+
+pub struct AppScrollbarState {
+    state: ScrollbarState,
+    pos: usize,
+    content_length: usize,
+    scale_modificator: usize,
 }
 
 #[derive(Debug)]
@@ -83,8 +89,12 @@ impl App {
         Self {
             state: AppState::Running,
             selected_tab: SelectedTab::Summary,
-            scrollbar_state: ScrollbarState::new(0),
-            scrollbar_pos: 0,
+            scrollbar_state: AppScrollbarState {
+                state: ScrollbarState::new(0),
+                pos: 0,
+                content_length: 0,
+                scale_modificator: 10,
+            },
         }
     }
 
@@ -99,10 +109,8 @@ impl App {
             read_input_events(tx).await;
         });
 
-        // Create a ticker for the main render loop
         let mut render_ticker = interval(Duration::from_millis(500));
 
-        // Main event loop
         while self.state == AppState::Running {
             render_ticker.tick().await;
 
@@ -111,7 +119,6 @@ impl App {
             self.handle_events(&rx);
         }
 
-        // Clean up
         input_handler.abort();
         Ok(())
     }
@@ -133,31 +140,41 @@ impl App {
 
     fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
-        self.scrollbar_pos = 0;
-        self.scrollbar_state = self.scrollbar_state.position(0);
+        self.scrollbar_state.pos = 0;
+        self.scrollbar_state.state = self.scrollbar_state.state.position(0);
     }
 
     fn previous_tab(&mut self) {
         self.selected_tab = self.selected_tab.previous();
-        self.scrollbar_pos = 0;
-        self.scrollbar_state = self.scrollbar_state.position(0);
+        self.scrollbar_state.pos = 0;
+        self.scrollbar_state.state = self.scrollbar_state.state.position(0);
     }
 
     fn scroll_down(&mut self) {
-        self.scrollbar_pos = self.scrollbar_pos.saturating_add(1);
-        self.scrollbar_state = self.scrollbar_state.position(self.scrollbar_pos);
+        self.scrollbar_state.pos = self
+            .scrollbar_state
+            .pos
+            .saturating_add(1)
+            .clamp(0, self.scrollbar_state.content_length);
+        self.scrollbar_state.state = self
+            .scrollbar_state
+            .state
+            .position(self.scrollbar_state.pos * self.scrollbar_state.scale_modificator);
     }
 
     fn scroll_up(&mut self) {
-        self.scrollbar_pos = self.scrollbar_pos.saturating_sub(1);
-        self.scrollbar_state = self.scrollbar_state.position(self.scrollbar_pos);
+        self.scrollbar_state.pos = self.scrollbar_state.pos.saturating_sub(1);
+        self.scrollbar_state.state = self
+            .scrollbar_state
+            .state
+            .position(self.scrollbar_state.pos * self.scrollbar_state.scale_modificator);
     }
 
     fn quit(&mut self) {
         self.state = AppState::Exiting;
     }
 
-    fn draw(&self, frame: &mut Frame, sys: &System) {
+    fn draw(&mut self, frame: &mut Frame, sys: &System) {
         let app_layout = prepare_layout(frame);
 
         self.render_tab_headers(frame, app_layout.header_area);
@@ -165,11 +182,33 @@ impl App {
         self.render_footer(frame, app_layout.footer_area);
     }
 
-    fn render_selected_tab(&self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
+    fn render_selected_tab(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
         match self.selected_tab {
             SelectedTab::Summary => render_summary_tab(frame, sys, &app_layout.summary_tab_layout),
             SelectedTab::CpuDetails => {
-                render_cpu_details_tab(frame, sys, &app_layout.cpu_details_tab_layout)
+                let content_length = render_cpu_details_tab(
+                    frame,
+                    sys,
+                    &app_layout.cpu_details_tab_layout,
+                    self.scrollbar_state.pos,
+                );
+
+                self.scrollbar_state.content_length = content_length;
+                self.scrollbar_state.state = self
+                    .scrollbar_state
+                    .state
+                    .content_length(content_length * self.scrollbar_state.scale_modificator);
+                frame.render_stateful_widget(
+                    Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                    app_layout
+                        .cpu_details_tab_layout
+                        .main_layout
+                        .inner(&Margin {
+                            vertical: 1,
+                            horizontal: 0,
+                        }),
+                    &mut self.scrollbar_state.state,
+                );
             }
             _ => (),
         }
