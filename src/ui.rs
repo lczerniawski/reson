@@ -2,32 +2,29 @@ use std::rc::Rc;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    text::Line,
-    widgets::{Bar, BarChart, BarGroup, Block, Borders},
     Frame,
 };
-use sysinfo::{CpuExt, System, SystemExt};
+use sysinfo::System;
 
 use crate::{
-    cpu::create_top_cpu_barchart, disk::create_top_disks_barchart, memory::create_memory_gauges,
-    network::create_top_networks_widget, processes::create_top_processes_table,
+    cpu::{create_details_cpu_barchart, create_top_cpu_barchart},
+    disk::create_top_disks_barchart,
+    memory::create_memory_gauges,
+    network::create_top_networks_widget,
+    processes::create_top_processes_table,
 };
 
 pub struct AppLayout {
     pub header_area: Rect,
     pub footer_area: Rect,
     pub summary_tab_layout: SummaryTabLayout,
-    pub cpu_details_tab_layout: CpuDetailsTabLayout,
+    pub cpu_details_tab_layout: Rect,
 }
 
 pub struct SummaryTabLayout {
     pub outer_layout: Rc<[Rect]>,
     pub inner_layout: Rc<[Rect]>,
     pub memory_layout: Rc<[Rect]>,
-}
-
-pub struct CpuDetailsTabLayout {
-    pub main_layout: Rect,
 }
 
 pub fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
@@ -45,16 +42,14 @@ pub fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
         header_area,
         footer_area,
         summary_tab_layout: prepare_summary_tab_layout(inner_area),
-        cpu_details_tab_layout: CpuDetailsTabLayout {
-            main_layout: inner_area,
-        },
+        cpu_details_tab_layout: prepare_cpu_details_tab_layout(inner_area),
     }
 }
 
 fn prepare_summary_tab_layout(inner_area: Rect) -> SummaryTabLayout {
     let outer_layout = Layout::default()
         .direction(Direction::Vertical)
-        .margin(1)
+        .vertical_margin(1)
         .constraints([
             Constraint::Percentage(30), // CPU + Memory
             Constraint::Percentage(30), // Top Processes
@@ -66,13 +61,11 @@ fn prepare_summary_tab_layout(inner_area: Rect) -> SummaryTabLayout {
 
     let inner_layout = Layout::default()
         .direction(Direction::Horizontal)
-        .margin(1)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(outer_layout[0]);
 
     let memory_layout = Layout::default()
         .direction(Direction::Vertical)
-        .margin(1)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(inner_layout[1]);
 
@@ -83,7 +76,12 @@ fn prepare_summary_tab_layout(inner_area: Rect) -> SummaryTabLayout {
     }
 }
 
-// fn prepare_cpu_tab_layout(inner_area: Rect) -> CpuDetailsTabLayout {}
+fn prepare_cpu_details_tab_layout(inner_area: Rect) -> Rect {
+    Layout::default()
+        .constraints([Constraint::Percentage(100)])
+        .vertical_margin(1)
+        .split(inner_area)[0]
+}
 
 pub fn render_summary_tab(frame: &mut Frame, sys: &System, summary_tab_layout: &SummaryTabLayout) {
     let top_cpu_barchart = create_top_cpu_barchart(sys);
@@ -112,52 +110,12 @@ pub fn render_summary_tab(frame: &mut Frame, sys: &System, summary_tab_layout: &
 pub fn render_cpu_details_tab(
     frame: &mut Frame,
     sys: &System,
-    cpu_tab_layout: &CpuDetailsTabLayout,
+    cpu_tab_layout: Rect,
     scroll_position: usize,
 ) -> usize {
-    let bar_width: u16 = 5;
-    let bar_gap: u16 = 1;
-
-    let title = Block::default()
-        .title(format!(
-            "CPU: {}, Frequence: {} MHz",
-            sys.global_cpu_info().brand(),
-            sys.global_cpu_info().frequency()
-        ))
-        .borders(Borders::all());
-
-    // -2 for borders
-    let visible_bars =
-        (cpu_tab_layout.main_layout.height).saturating_sub(2) / (bar_width + bar_gap);
-
-    let visible_cpus = sys
-        .cpus()
-        .iter()
-        .enumerate()
-        .skip(scroll_position)
-        .take(visible_bars as usize);
-
-    let bars: Vec<_> = visible_cpus
-        .map(|(i, cpu)| {
-            let cpu_usage = cpu.cpu_usage() as u64;
-
-            Bar::default()
-                .value(cpu_usage)
-                .text_value(format!("{cpu_usage:>3}%"))
-                .label(Line::from(format!("Core #{}", i + 1)))
-        })
-        .collect();
-
-    let barchart = BarChart::default()
-        .data(BarGroup::default().bars(&bars))
-        .block(title)
-        .bar_width(bar_width)
-        .bar_gap(bar_gap)
-        .max(100)
-        .direction(Direction::Horizontal);
-
-    let content_length = sys.cpus().len() - visible_bars as usize;
-    frame.render_widget(barchart, cpu_tab_layout.main_layout);
+    let (barchart, content_length) =
+        create_details_cpu_barchart(sys, cpu_tab_layout.height, scroll_position);
+    frame.render_widget(barchart, cpu_tab_layout);
 
     content_length
 }

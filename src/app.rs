@@ -93,7 +93,7 @@ impl App {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 content_length: 0,
-                scale_modificator: 10,
+                scale_modificator: 20,
             },
         }
     }
@@ -189,7 +189,7 @@ impl App {
                 let content_length = render_cpu_details_tab(
                     frame,
                     sys,
-                    &app_layout.cpu_details_tab_layout,
+                    app_layout.cpu_details_tab_layout,
                     self.scrollbar_state.pos,
                 );
 
@@ -200,13 +200,10 @@ impl App {
                     .content_length(content_length * self.scrollbar_state.scale_modificator);
                 frame.render_stateful_widget(
                     Scrollbar::new(ScrollbarOrientation::VerticalRight),
-                    app_layout
-                        .cpu_details_tab_layout
-                        .main_layout
-                        .inner(&Margin {
-                            vertical: 1,
-                            horizontal: 0,
-                        }),
+                    app_layout.cpu_details_tab_layout.inner(&Margin {
+                        vertical: 1,
+                        horizontal: 0,
+                    }),
                     &mut self.scrollbar_state.state,
                 );
             }
@@ -227,7 +224,7 @@ impl App {
 
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
         let footer = Block::default()
-            .title("◄ ► or h l to change tab | ▲ ▼ or j k to scroll | Press q to quit")
+            .title("◄ ► or h l to change tab | ▲ ▼ or k j to scroll | Press q to quit")
             .title_alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
     }
