@@ -59,7 +59,7 @@ pub fn create_details_cpu_barchart(
 
     let title = Block::default()
         .title(format!(
-            "CPU: {}, Total Usage: {}%, Max Frequence: {} MHz",
+            "CPU: {}, Total Usage: {}%, Max Frequency: {} MHz",
             sys.global_cpu_info().brand(),
             sys.global_cpu_info().cpu_usage().round(),
             sys.global_cpu_info().frequency()

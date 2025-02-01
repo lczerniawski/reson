@@ -89,7 +89,7 @@ impl App {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 content_length: 0,
-                scale_modificator: 20,
+                scale_modificator: 15,
             },
         }
     }
@@ -99,7 +99,7 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         sys: &mut System,
     ) -> Result<()> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<KeyboardMessage>(100);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<KeyboardMessage>(10);
 
         let input_handler = tokio::spawn(async move {
             read_input_events(tx).await;
