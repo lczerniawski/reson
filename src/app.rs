@@ -104,7 +104,7 @@ impl App {
         let input_handler = tokio::spawn(read_input_events(tx.clone()));
 
         let mut draw_ticker = interval(Duration::from_millis(150));
-        let mut refresh_ticker = interval(Duration::from_millis(500));
+        let mut refresh_ticker = interval(Duration::from_millis(1000));
         while self.state == AppState::Running {
             tokio::select! {
                 _ = refresh_ticker.tick() => {
@@ -197,6 +197,7 @@ impl App {
                     .scrollbar_state
                     .state
                     .content_length(content_length * self.scrollbar_state.scale_modificator);
+
                 frame.render_stateful_widget(
                     Scrollbar::new(ScrollbarOrientation::VerticalRight),
                     app_layout.cpu_details_tab_layout.inner(&Margin {

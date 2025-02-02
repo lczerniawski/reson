@@ -97,7 +97,7 @@ pub fn create_details_cpu_barchart(
         .style(Style::default().fg(Color::Green))
         .direction(Direction::Horizontal);
 
-    let content_length = sys.cpus().len() - visible_bars as usize;
+    let content_length = sys.cpus().len().saturating_sub(visible_bars as usize);
 
     (barchart, content_length)
 }
