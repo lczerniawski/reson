@@ -2,7 +2,7 @@ use std::{io::Stdout, time::Duration};
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
 use color_eyre::{eyre::Ok, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use ratatui::{
     layout::{Alignment, Margin, Rect},
@@ -101,9 +101,7 @@ impl App {
     ) -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<KeyboardMessage>(10);
 
-        let input_handler = tokio::spawn(async move {
-            read_input_events(tx).await;
-        });
+        let input_handler = tokio::spawn(read_input_events(tx.clone()));
 
         let mut draw_ticker = interval(Duration::from_millis(150));
         let mut refresh_ticker = interval(Duration::from_millis(500));
@@ -237,6 +235,13 @@ async fn read_input_events(tx: Sender<KeyboardMessage>) {
             if key.kind == KeyEventKind::Press {
                 let msg = match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => KeyboardMessage::Quit,
+                    KeyCode::Char('c') => {
+                        if key.modifiers == KeyModifiers::CONTROL {
+                            KeyboardMessage::Quit
+                        } else {
+                            KeyboardMessage::KeyPress(key.code)
+                        }
+                    }
                     code => KeyboardMessage::KeyPress(code),
                 };
                 if tx.send(msg).await.is_err() {
