@@ -14,15 +14,20 @@ use ratatui::{
 use sysinfo::{System, SystemExt};
 use tokio::{sync::mpsc::Sender, time::interval};
 
+use crate::disk::create_top_disks_barchart;
+use crate::layout::MainLayout;
+use crate::memory::create_memory_gauges;
+use crate::network::create_top_networks_widget;
+use crate::processes::create_top_processes_table;
 use crate::{
-    cpu::create_top_cpu_barchart,
-    layout::{prepare_layout, render, AppLayout},
+    cpu::create_cpu_barchart,
+    layout::{prepare_layout, AppLayout},
 };
 
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
-    cpu_scrollbar_state: AppScrollbarState,
+    cpu_scrollbar_state: CpuScrollbarState,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -48,11 +53,31 @@ enum SelectedTab {
     Disks,
 }
 
-pub struct AppScrollbarState {
+impl SelectedTab {
+    fn next(&self) -> Self {
+        match self {
+            Self::Cpu => Self::Processes,
+            Self::Processes => Self::Networks,
+            Self::Networks => Self::Disks,
+            Self::Disks => Self::Cpu,
+        }
+    }
+
+    fn prev(&self) -> Self {
+        match self {
+            Self::Cpu => Self::Disks,
+            Self::Processes => Self::Cpu,
+            Self::Networks => Self::Processes,
+            Self::Disks => Self::Networks,
+        }
+    }
+}
+
+struct CpuScrollbarState {
     state: ScrollbarState,
     pos: usize,
-    content_length: usize,
-    scale_modificator: usize,
+    max_scroll: usize,
+    real_content_length: usize,
 }
 
 #[derive(Debug)]
@@ -66,11 +91,11 @@ impl App {
         Self {
             state: AppState::Running,
             selected_tab: SelectedTab::Cpu,
-            cpu_scrollbar_state: AppScrollbarState {
+            cpu_scrollbar_state: CpuScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
-                content_length: 0,
-                scale_modificator: 15,
+                max_scroll: 0,
+                real_content_length: 0,
             },
         }
     }
@@ -111,35 +136,56 @@ impl App {
                 KeyCode::Char('h') | KeyCode::Left => self.scroll_left(),
                 KeyCode::Char('j') | KeyCode::Down => self.scroll_down(),
                 KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
+                KeyCode::Tab => self.next_tab(),
+                KeyCode::BackTab => self.prev_tab(),
                 _ => {}
             },
             KeyboardMessage::Quit => self.quit(),
         }
     }
 
-    fn scroll_right(&mut self) {}
+    // TODO create scroll_prev and scroll_next for each of the Tabs and use it here accordingly to SelectedTab
+    fn scroll_right(&mut self) {
+        if self.cpu_scrollbar_state.max_scroll == 0 {
+            return;
+        }
 
-    fn scroll_left(&mut self) {}
-
-    fn scroll_down(&mut self) {
         self.cpu_scrollbar_state.pos = self
             .cpu_scrollbar_state
             .pos
             .saturating_add(1)
-            .clamp(0, self.cpu_scrollbar_state.content_length);
+            .clamp(0, self.cpu_scrollbar_state.max_scroll);
 
-        self.cpu_scrollbar_state.state = self
-            .cpu_scrollbar_state
-            .state
-            .position(self.cpu_scrollbar_state.pos * self.cpu_scrollbar_state.scale_modificator);
+        self.cpu_scrollbar_state.state = self.cpu_scrollbar_state.state.position(
+            self.cpu_scrollbar_state.pos
+                * (self.cpu_scrollbar_state.real_content_length
+                    / self.cpu_scrollbar_state.max_scroll),
+        );
     }
 
-    fn scroll_up(&mut self) {
+    fn scroll_left(&mut self) {
+        if self.cpu_scrollbar_state.max_scroll == 0 {
+            return;
+        }
+
         self.cpu_scrollbar_state.pos = self.cpu_scrollbar_state.pos.saturating_sub(1);
-        self.cpu_scrollbar_state.state = self
-            .cpu_scrollbar_state
-            .state
-            .position(self.cpu_scrollbar_state.pos * self.cpu_scrollbar_state.scale_modificator);
+        self.cpu_scrollbar_state.state = self.cpu_scrollbar_state.state.position(
+            self.cpu_scrollbar_state.pos
+                * (self.cpu_scrollbar_state.real_content_length
+                    / self.cpu_scrollbar_state.max_scroll),
+        );
+    }
+
+    fn scroll_down(&mut self) {}
+
+    fn scroll_up(&mut self) {}
+
+    fn next_tab(&mut self) {
+        self.selected_tab = self.selected_tab.next();
+    }
+
+    fn prev_tab(&mut self) {
+        self.selected_tab = self.selected_tab.prev();
     }
 
     fn quit(&mut self) {
@@ -159,28 +205,40 @@ impl App {
     }
 
     fn render_cpu(&mut self, frame: &mut Frame<'_>, sys: &System, app_layout: &AppLayout) {
-        let (barchart, content_length) = create_top_cpu_barchart(
+        let is_selected = matches!(self.selected_tab, SelectedTab::Cpu);
+
+        let cpu_barchart = create_cpu_barchart(
             sys,
             app_layout
                 .main_layout
                 .cpu_plus_memory_layout
                 .cpu_layout
-                .width,
+                .width
+                .into(),
             self.cpu_scrollbar_state.pos,
+            is_selected,
         );
+
         frame.render_widget(
-            barchart,
+            cpu_barchart.chart,
             app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
         );
 
-        self.cpu_scrollbar_state.content_length = content_length;
+        // TODO fix scrollbar scalling when resizing window
+        self.cpu_scrollbar_state.max_scroll = cpu_barchart.max_scroll;
+        self.cpu_scrollbar_state.real_content_length = cpu_barchart.real_content_length;
+
         self.cpu_scrollbar_state.state = self
             .cpu_scrollbar_state
             .state
-            .content_length(content_length * self.cpu_scrollbar_state.scale_modificator);
+            .content_length(cpu_barchart.real_content_length);
 
         frame.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::HorizontalBottom),
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+                .track_symbol(Some("═"))
+                .thumb_symbol("■")
+                .begin_symbol(Some("◀"))
+                .end_symbol(Some("▶")),
             app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
             &mut self.cpu_scrollbar_state.state,
         );
@@ -189,7 +247,7 @@ impl App {
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
         let footer = Block::default()
             .title(
-                "Press Tab to change between tabs | Press ◄ ▼ ▲ ► or h j k l to scroll | Press q to quit",
+                "Press Tab for next tab, Shift + Tab for previous tab | Press ◄ ▼ ▲ ► or h j k l to scroll | Press q to quit",
             )
             .title_alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
@@ -217,4 +275,25 @@ async fn read_input_events(tx: Sender<KeyboardMessage>) {
             }
         }
     }
+}
+
+fn render(frame: &mut Frame, sys: &System, main_layout: &MainLayout) {
+    let memory_gauges = create_memory_gauges(sys);
+    frame.render_widget(
+        memory_gauges.ram_gauge,
+        main_layout.cpu_plus_memory_layout.memory_layout.ram_layout,
+    );
+    frame.render_widget(
+        memory_gauges.swap_gauge,
+        main_layout.cpu_plus_memory_layout.memory_layout.swap_layout,
+    );
+
+    let top_processes_table = create_top_processes_table(sys);
+    frame.render_widget(top_processes_table, main_layout.processes_layout);
+
+    let disk_barchart = create_top_disks_barchart(sys);
+    frame.render_widget(disk_barchart, main_layout.disk_layout);
+
+    let network_widget = create_top_networks_widget(sys);
+    frame.render_widget(network_widget, main_layout.network_layout);
 }

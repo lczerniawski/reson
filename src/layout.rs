@@ -1,15 +1,4 @@
-use std::rc::Rc;
-
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    Frame,
-};
-use sysinfo::System;
-
-use crate::{
-    disk::create_top_disks_barchart, memory::create_memory_gauges,
-    network::create_top_networks_widget, processes::create_top_processes_table,
-};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub struct AppLayout {
     pub main_layout: MainLayout,
@@ -83,25 +72,4 @@ fn prepare_main_layout(inner_area: Rect) -> MainLayout {
         disk_layout: main_layout[2],
         network_layout: main_layout[3],
     }
-}
-
-pub fn render(frame: &mut Frame, sys: &System, main_layout: &MainLayout) {
-    let memory_gauges = create_memory_gauges(sys);
-    frame.render_widget(
-        memory_gauges.ram_gauge,
-        main_layout.cpu_plus_memory_layout.memory_layout.ram_layout,
-    );
-    frame.render_widget(
-        memory_gauges.swap_gauge,
-        main_layout.cpu_plus_memory_layout.memory_layout.swap_layout,
-    );
-
-    let top_processes_table = create_top_processes_table(sys);
-    frame.render_widget(top_processes_table, main_layout.processes_layout);
-
-    let disk_barchart = create_top_disks_barchart(sys);
-    frame.render_widget(disk_barchart, main_layout.disk_layout);
-
-    let network_widget = create_top_networks_widget(sys);
-    frame.render_widget(network_widget, main_layout.network_layout);
 }

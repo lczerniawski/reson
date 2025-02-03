@@ -1,25 +1,43 @@
 use ratatui::{
     style::{Color, Style},
     text::Line,
-    widgets::{Bar, BarChart, BarGroup, Block, Borders},
+    widgets::{Bar, BarChart, BarGroup, Block, BorderType, Borders},
 };
 use sysinfo::{CpuExt, System, SystemExt};
 
-pub fn create_top_cpu_barchart(
+pub struct CpuBarchart<'a_> {
+    pub chart: BarChart<'a_>,
+    pub max_scroll: usize,
+    pub real_content_length: usize,
+}
+pub fn create_cpu_barchart(
     sys: &System,
-    layout_width: u16,
+    layout_width: usize,
     scroll_position: usize,
-) -> (BarChart<'_>, usize) {
+    is_selected: bool,
+) -> CpuBarchart<'_> {
     let bar_width: u16 = 7;
     let bar_gap: u16 = 2;
-    let visible_bars = layout_width / (bar_width + bar_gap);
+    let visible_bars = layout_width / (bar_width + bar_gap) as usize;
+
+    let border_style = if is_selected {
+        Style::default().fg(Color::LightRed)
+    } else {
+        Style::default()
+    };
+
+    let border_type = if is_selected {
+        BorderType::Thick
+    } else {
+        BorderType::Plain
+    };
 
     let cpu_data: Vec<Bar> = sys
         .cpus()
         .iter()
         .enumerate()
         .skip(scroll_position)
-        .take(visible_bars as usize)
+        .take(visible_bars)
         .map(|(cpu_count, cpu)| {
             let cpu_usage = cpu.cpu_usage() as u64;
             Bar::default()
@@ -30,7 +48,14 @@ pub fn create_top_cpu_barchart(
         })
         .collect();
 
-    let content_length = sys.cpus().len().saturating_sub(visible_bars as usize);
+    let bar_count = sys.cpus().len();
+    let max_scroll = bar_count.saturating_sub(visible_bars as usize);
+    let real_content_length = if visible_bars == bar_count {
+        0
+    } else {
+        bar_count * (bar_width + bar_gap) as usize
+    };
+
     let barchart = BarChart::default()
         .block(
             Block::default()
@@ -39,7 +64,9 @@ pub fn create_top_cpu_barchart(
                     sys.global_cpu_info().cpu_usage().round(),
                     sys.global_cpu_info().frequency()
                 ))
-                .borders(Borders::all()),
+                .borders(Borders::all())
+                .border_style(border_style)
+                .border_type(border_type),
         )
         .data(BarGroup::default().bars(&cpu_data))
         .style(Style::default().fg(Color::Green))
@@ -47,5 +74,9 @@ pub fn create_top_cpu_barchart(
         .bar_gap(bar_gap)
         .max(100);
 
-    (barchart, content_length)
+    CpuBarchart {
+        chart: barchart,
+        max_scroll,
+        real_content_length,
+    }
 }
