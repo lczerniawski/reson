@@ -1,5 +1,5 @@
 use ratatui::{
-    style::{Color, Style},
+    style::{Color, Style, Stylize},
     text::Line,
     widgets::{Bar, BarChart, BarGroup, Block, BorderType, Borders},
 };
@@ -21,7 +21,13 @@ pub fn create_cpu_barchart(
     let visible_bars = layout_width / (bar_width + bar_gap) as usize;
 
     let border_style = if is_selected {
-        Style::default().fg(Color::LightRed)
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    };
+
+    let title_style = if is_selected {
+        Style::default().bold()
     } else {
         Style::default()
     };
@@ -64,6 +70,7 @@ pub fn create_cpu_barchart(
                     sys.global_cpu_info().cpu_usage().round(),
                     sys.global_cpu_info().frequency()
                 ))
+                .title_style(title_style)
                 .borders(Borders::all())
                 .border_style(border_style)
                 .border_type(border_type),
