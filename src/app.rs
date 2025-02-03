@@ -71,6 +71,22 @@ impl SelectedTab {
             Self::Disks => Self::Networks,
         }
     }
+
+    fn is_cpu(&self) -> bool {
+        matches!(self, SelectedTab::Cpu)
+    }
+
+    fn is_processes(&self) -> bool {
+        matches!(self, SelectedTab::Processes)
+    }
+
+    fn is_network(&self) -> bool {
+        matches!(self, SelectedTab::Networks)
+    }
+
+    fn is_disks(&self) -> bool {
+        matches!(self, SelectedTab::Disks)
+    }
 }
 
 struct CpuScrollbarState {
@@ -78,6 +94,31 @@ struct CpuScrollbarState {
     pos: usize,
     max_scroll: usize,
     real_content_length: usize,
+}
+
+impl CpuScrollbarState {
+    fn scroll_next(&mut self) {
+        if self.max_scroll == 0 {
+            return;
+        }
+
+        self.pos = self.pos.saturating_add(1).clamp(0, self.max_scroll);
+
+        self.state = self
+            .state
+            .position(self.pos * (self.real_content_length / self.max_scroll));
+    }
+
+    fn scroll_prev(&mut self) {
+        if self.max_scroll == 0 {
+            return;
+        }
+
+        self.pos = self.pos.saturating_sub(1);
+        self.state = self
+            .state
+            .position(self.pos * (self.real_content_length / self.max_scroll));
+    }
 }
 
 #[derive(Debug)]
@@ -144,36 +185,16 @@ impl App {
         }
     }
 
-    // TODO create scroll_prev and scroll_next for each of the Tabs and use it here accordingly to SelectedTab
     fn scroll_right(&mut self) {
-        if self.cpu_scrollbar_state.max_scroll == 0 {
-            return;
+        if self.selected_tab.is_cpu() {
+            self.cpu_scrollbar_state.scroll_next();
         }
-
-        self.cpu_scrollbar_state.pos = self
-            .cpu_scrollbar_state
-            .pos
-            .saturating_add(1)
-            .clamp(0, self.cpu_scrollbar_state.max_scroll);
-
-        self.cpu_scrollbar_state.state = self.cpu_scrollbar_state.state.position(
-            self.cpu_scrollbar_state.pos
-                * (self.cpu_scrollbar_state.real_content_length
-                    / self.cpu_scrollbar_state.max_scroll),
-        );
     }
 
     fn scroll_left(&mut self) {
-        if self.cpu_scrollbar_state.max_scroll == 0 {
-            return;
+        if self.selected_tab.is_cpu() {
+            self.cpu_scrollbar_state.scroll_prev();
         }
-
-        self.cpu_scrollbar_state.pos = self.cpu_scrollbar_state.pos.saturating_sub(1);
-        self.cpu_scrollbar_state.state = self.cpu_scrollbar_state.state.position(
-            self.cpu_scrollbar_state.pos
-                * (self.cpu_scrollbar_state.real_content_length
-                    / self.cpu_scrollbar_state.max_scroll),
-        );
     }
 
     fn scroll_down(&mut self) {}
@@ -195,17 +216,17 @@ impl App {
     fn draw(&mut self, frame: &mut Frame, sys: &System) {
         let app_layout = prepare_layout(frame);
 
-        self.render_window(frame, sys, &app_layout);
+        self.render_main_layout(frame, sys, &app_layout);
         self.render_footer(frame, app_layout.footer_area);
     }
 
-    fn render_window(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
+    fn render_main_layout(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
         self.render_cpu(frame, sys, app_layout);
         render(frame, sys, &app_layout.main_layout);
     }
 
     fn render_cpu(&mut self, frame: &mut Frame<'_>, sys: &System, app_layout: &AppLayout) {
-        let is_selected = matches!(self.selected_tab, SelectedTab::Cpu);
+        let is_selected = self.selected_tab.is_cpu();
 
         let cpu_barchart = create_cpu_barchart(
             sys,
