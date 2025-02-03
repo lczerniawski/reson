@@ -103,10 +103,7 @@ impl CpuScrollbarState {
         }
 
         self.pos = self.pos.saturating_add(1).clamp(0, self.max_scroll);
-
-        self.state = self
-            .state
-            .position(self.pos * (self.real_content_length / self.max_scroll));
+        self.current_pos_scroll_update();
     }
 
     fn scroll_prev(&mut self) {
@@ -115,6 +112,14 @@ impl CpuScrollbarState {
         }
 
         self.pos = self.pos.saturating_sub(1);
+        self.current_pos_scroll_update();
+    }
+
+    fn current_pos_scroll_update(&mut self) {
+        if self.max_scroll == 0 {
+            return;
+        }
+
         self.state = self
             .state
             .position(self.pos * (self.real_content_length / self.max_scroll));
@@ -246,7 +251,14 @@ impl App {
 
         frame.render_widget(cpu_barchart.chart, *cpu_layout);
 
-        // TODO fix scrollbar scalling when resizing window
+        // When window is growing and user is at the end of the CPUs we need to remove pos in order to keep on displaying more
+        // of the CPUs from left side
+        if self.cpu_scrollbar_state.pos == self.cpu_scrollbar_state.max_scroll
+            && cpu_barchart.max_scroll < self.cpu_scrollbar_state.max_scroll
+        {
+            self.cpu_scrollbar_state.pos = self.cpu_scrollbar_state.pos.saturating_sub(1);
+        }
+
         self.cpu_scrollbar_state.max_scroll = cpu_barchart.max_scroll;
         self.cpu_scrollbar_state.real_content_length = cpu_barchart.real_content_length;
 
@@ -254,6 +266,8 @@ impl App {
             .cpu_scrollbar_state
             .state
             .content_length(cpu_barchart.real_content_length);
+
+        self.cpu_scrollbar_state.current_pos_scroll_update();
 
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
