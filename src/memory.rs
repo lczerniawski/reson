@@ -5,7 +5,7 @@ use ratatui::{
 use sysinfo::{System, SystemExt};
 
 pub struct MemoryGauges<'a> {
-    pub main_memory_gauge: Gauge<'a>,
+    pub ram_gauge: Gauge<'a>,
     pub swap_gauge: Gauge<'a>,
 }
 
@@ -46,7 +46,7 @@ pub fn create_memory_gauges(sys: &System) -> MemoryGauges {
         .percent(swap_percentage as u16);
 
     MemoryGauges {
-        main_memory_gauge: memory_gauge,
+        ram_gauge: memory_gauge,
         swap_gauge,
     }
 }

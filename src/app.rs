@@ -1,26 +1,28 @@
 use std::{io::Stdout, time::Duration};
-use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
+use strum::{Display, EnumIter, FromRepr};
 
 use color_eyre::{eyre::Ok, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
+use ratatui::widgets::ScrollbarOrientation;
 use ratatui::{
-    layout::{Alignment, Margin, Rect},
+    layout::{Alignment, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Style},
-    text::Line,
-    widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs},
+    widgets::{Block, Scrollbar, ScrollbarState},
     Frame, Terminal,
 };
 use sysinfo::{System, SystemExt};
 use tokio::{sync::mpsc::Sender, time::interval};
 
-use crate::ui::{prepare_layout, render_cpu_details_tab, render_summary_tab, AppLayout};
+use crate::{
+    cpu::create_top_cpu_barchart,
+    layout::{prepare_layout, render, AppLayout},
+};
 
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
-    scrollbar_state: AppScrollbarState,
+    cpu_scrollbar_state: AppScrollbarState,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -33,20 +35,17 @@ enum AppState {
 #[derive(Default, Clone, Copy, Display, FromRepr, EnumIter)]
 enum SelectedTab {
     #[default]
-    #[strum(to_string = "Summary")]
-    Summary,
+    #[strum(to_string = "CPU")]
+    Cpu,
 
-    #[strum(to_string = "Processes Details")]
-    ProcessessDetails,
+    #[strum(to_string = "Processes")]
+    Processes,
 
-    #[strum(to_string = "Network Details")]
-    NetworkDetails,
+    #[strum(to_string = "Networks")]
+    Networks,
 
-    #[strum(to_string = "CPU Details")]
-    CpuDetails,
-
-    #[strum(to_string = "Disk Details")]
-    DiskDetails,
+    #[strum(to_string = "Disks")]
+    Disks,
 }
 
 pub struct AppScrollbarState {
@@ -62,30 +61,12 @@ enum KeyboardMessage {
     Quit,
 }
 
-impl SelectedTab {
-    fn next(self) -> Self {
-        let current_index = self as usize;
-        let next_index = current_index.saturating_add(1);
-        Self::from_repr(next_index).unwrap_or(self)
-    }
-
-    fn previous(self) -> Self {
-        let current_index = self as usize;
-        let previous_index = current_index.saturating_sub(1);
-        Self::from_repr(previous_index).unwrap_or(self)
-    }
-
-    fn title(self) -> Line<'static> {
-        Line::from(format!("  {self}  "))
-    }
-}
-
 impl App {
     pub fn new() -> Self {
         Self {
             state: AppState::Running,
-            selected_tab: SelectedTab::Summary,
-            scrollbar_state: AppScrollbarState {
+            selected_tab: SelectedTab::Cpu,
+            cpu_scrollbar_state: AppScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 content_length: 0,
@@ -126,8 +107,8 @@ impl App {
     fn handle_events(&mut self, message: &KeyboardMessage) {
         match message {
             KeyboardMessage::KeyPress(code) => match code {
-                KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
-                KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
+                KeyCode::Char('l') | KeyCode::Right => self.scroll_right(),
+                KeyCode::Char('h') | KeyCode::Left => self.scroll_left(),
                 KeyCode::Char('j') | KeyCode::Down => self.scroll_down(),
                 KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
                 _ => {}
@@ -136,37 +117,29 @@ impl App {
         }
     }
 
-    fn next_tab(&mut self) {
-        self.selected_tab = self.selected_tab.next();
-        self.scrollbar_state.pos = 0;
-        self.scrollbar_state.state = self.scrollbar_state.state.position(0);
-    }
+    fn scroll_right(&mut self) {}
 
-    fn previous_tab(&mut self) {
-        self.selected_tab = self.selected_tab.previous();
-        self.scrollbar_state.pos = 0;
-        self.scrollbar_state.state = self.scrollbar_state.state.position(0);
-    }
+    fn scroll_left(&mut self) {}
 
     fn scroll_down(&mut self) {
-        self.scrollbar_state.pos = self
-            .scrollbar_state
+        self.cpu_scrollbar_state.pos = self
+            .cpu_scrollbar_state
             .pos
             .saturating_add(1)
-            .clamp(0, self.scrollbar_state.content_length);
+            .clamp(0, self.cpu_scrollbar_state.content_length);
 
-        self.scrollbar_state.state = self
-            .scrollbar_state
+        self.cpu_scrollbar_state.state = self
+            .cpu_scrollbar_state
             .state
-            .position(self.scrollbar_state.pos * self.scrollbar_state.scale_modificator);
+            .position(self.cpu_scrollbar_state.pos * self.cpu_scrollbar_state.scale_modificator);
     }
 
     fn scroll_up(&mut self) {
-        self.scrollbar_state.pos = self.scrollbar_state.pos.saturating_sub(1);
-        self.scrollbar_state.state = self
-            .scrollbar_state
+        self.cpu_scrollbar_state.pos = self.cpu_scrollbar_state.pos.saturating_sub(1);
+        self.cpu_scrollbar_state.state = self
+            .cpu_scrollbar_state
             .state
-            .position(self.scrollbar_state.pos * self.scrollbar_state.scale_modificator);
+            .position(self.cpu_scrollbar_state.pos * self.cpu_scrollbar_state.scale_modificator);
     }
 
     fn quit(&mut self) {
@@ -176,55 +149,48 @@ impl App {
     fn draw(&mut self, frame: &mut Frame, sys: &System) {
         let app_layout = prepare_layout(frame);
 
-        self.render_tab_headers(frame, app_layout.header_area);
-        self.render_selected_tab(frame, sys, &app_layout);
+        self.render_window(frame, sys, &app_layout);
         self.render_footer(frame, app_layout.footer_area);
     }
 
-    fn render_selected_tab(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
-        match self.selected_tab {
-            SelectedTab::Summary => render_summary_tab(frame, sys, &app_layout.summary_tab_layout),
-            SelectedTab::CpuDetails => {
-                let content_length = render_cpu_details_tab(
-                    frame,
-                    sys,
-                    app_layout.cpu_details_tab_layout,
-                    self.scrollbar_state.pos,
-                );
-
-                self.scrollbar_state.content_length = content_length;
-                self.scrollbar_state.state = self
-                    .scrollbar_state
-                    .state
-                    .content_length(content_length * self.scrollbar_state.scale_modificator);
-
-                frame.render_stateful_widget(
-                    Scrollbar::new(ScrollbarOrientation::VerticalRight),
-                    app_layout.cpu_details_tab_layout.inner(&Margin {
-                        vertical: 1,
-                        horizontal: 0,
-                    }),
-                    &mut self.scrollbar_state.state,
-                );
-            }
-            _ => (),
-        }
+    fn render_window(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
+        self.render_cpu(frame, sys, app_layout);
+        render(frame, sys, &app_layout.main_layout);
     }
 
-    fn render_tab_headers(&self, frame: &mut Frame, header_area: Rect) {
-        let titles = SelectedTab::iter().map(SelectedTab::title).collect();
-        let selected_tab_index = self.selected_tab as usize;
-        let tabs_widget = Tabs::new(titles)
-            .select(selected_tab_index)
-            .divider("|")
-            .style(Style::default().fg(Color::Blue))
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Blue));
-        frame.render_widget(tabs_widget, header_area);
+    fn render_cpu(&mut self, frame: &mut Frame<'_>, sys: &System, app_layout: &AppLayout) {
+        let (barchart, content_length) = create_top_cpu_barchart(
+            sys,
+            app_layout
+                .main_layout
+                .cpu_plus_memory_layout
+                .cpu_layout
+                .width,
+            self.cpu_scrollbar_state.pos,
+        );
+        frame.render_widget(
+            barchart,
+            app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
+        );
+
+        self.cpu_scrollbar_state.content_length = content_length;
+        self.cpu_scrollbar_state.state = self
+            .cpu_scrollbar_state
+            .state
+            .content_length(content_length * self.cpu_scrollbar_state.scale_modificator);
+
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom),
+            app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
+            &mut self.cpu_scrollbar_state.state,
+        );
     }
 
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
         let footer = Block::default()
-            .title("◄ ► or h l to change tab | ▲ ▼ or k j to scroll | Press q to quit")
+            .title(
+                "Press Tab to change between tabs | Press ◄ ▼ ▲ ► or h j k l to scroll | Press q to quit",
+            )
             .title_alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
     }
