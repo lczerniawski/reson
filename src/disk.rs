@@ -4,7 +4,7 @@ use ratatui::{
 };
 use sysinfo::{DiskExt, System, SystemExt};
 
-pub fn create_top_disks_barchart(sys: &System) -> Paragraph<'_> {
+pub fn create_top_disks_widget(sys: &System) -> Paragraph<'_> {
     let mut disks: Vec<_> = sys.disks().iter().collect();
     disks.sort_by(|a, b| {
         b.available_space()

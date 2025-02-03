@@ -14,7 +14,7 @@ use ratatui::{
 use sysinfo::{System, SystemExt};
 use tokio::{sync::mpsc::Sender, time::interval};
 
-use crate::disk::create_top_disks_barchart;
+use crate::disk::create_top_disks_widget;
 use crate::layout::{MainLayout, MemoryLayout};
 use crate::memory::create_memory_gauges;
 use crate::network::create_top_networks_widget;
@@ -309,8 +309,8 @@ fn render(frame: &mut Frame, sys: &System, main_layout: &MainLayout) {
     let top_processes_table = create_top_processes_table(sys);
     frame.render_widget(top_processes_table, main_layout.processes_layout);
 
-    let disk_barchart = create_top_disks_barchart(sys);
-    frame.render_widget(disk_barchart, main_layout.disk_layout);
+    let disk_widget = create_top_disks_widget(sys);
+    frame.render_widget(disk_widget, main_layout.disk_layout);
 
     let network_widget = create_top_networks_widget(sys);
     frame.render_widget(network_widget, main_layout.network_layout);
