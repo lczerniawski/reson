@@ -15,7 +15,7 @@ use sysinfo::{System, SystemExt};
 use tokio::{sync::mpsc::Sender, time::interval};
 
 use crate::disk::create_top_disks_barchart;
-use crate::layout::MainLayout;
+use crate::layout::{MainLayout, MemoryLayout};
 use crate::memory::create_memory_gauges;
 use crate::network::create_top_networks_widget;
 use crate::processes::create_top_processes_table;
@@ -221,29 +221,30 @@ impl App {
     }
 
     fn render_main_layout(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
-        self.render_cpu(frame, sys, app_layout);
+        self.render_cpu(
+            frame,
+            sys,
+            &app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
+        );
+        self.render_memory_gauges(
+            frame,
+            sys,
+            &app_layout.main_layout.cpu_plus_memory_layout.memory_layout,
+        );
         render(frame, sys, &app_layout.main_layout);
     }
 
-    fn render_cpu(&mut self, frame: &mut Frame<'_>, sys: &System, app_layout: &AppLayout) {
+    fn render_cpu(&mut self, frame: &mut Frame, sys: &System, cpu_layout: &Rect) {
         let is_selected = self.selected_tab.is_cpu();
 
         let cpu_barchart = create_cpu_barchart(
             sys,
-            app_layout
-                .main_layout
-                .cpu_plus_memory_layout
-                .cpu_layout
-                .width
-                .into(),
+            cpu_layout.width.into(),
             self.cpu_scrollbar_state.pos,
             is_selected,
         );
 
-        frame.render_widget(
-            cpu_barchart.chart,
-            app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
-        );
+        frame.render_widget(cpu_barchart.chart, *cpu_layout);
 
         // TODO fix scrollbar scalling when resizing window
         self.cpu_scrollbar_state.max_scroll = cpu_barchart.max_scroll;
@@ -260,9 +261,15 @@ impl App {
                 .thumb_symbol("■")
                 .begin_symbol(Some("◀"))
                 .end_symbol(Some("▶")),
-            app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
+            *cpu_layout,
             &mut self.cpu_scrollbar_state.state,
         );
+    }
+
+    fn render_memory_gauges(&self, frame: &mut Frame, sys: &System, memory_layout: &MemoryLayout) {
+        let memory_gauges = create_memory_gauges(sys);
+        frame.render_widget(memory_gauges.ram_gauge, memory_layout.ram_layout);
+        frame.render_widget(memory_gauges.swap_gauge, memory_layout.swap_layout);
     }
 
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
@@ -299,16 +306,6 @@ async fn read_input_events(tx: Sender<KeyboardMessage>) {
 }
 
 fn render(frame: &mut Frame, sys: &System, main_layout: &MainLayout) {
-    let memory_gauges = create_memory_gauges(sys);
-    frame.render_widget(
-        memory_gauges.ram_gauge,
-        main_layout.cpu_plus_memory_layout.memory_layout.ram_layout,
-    );
-    frame.render_widget(
-        memory_gauges.swap_gauge,
-        main_layout.cpu_plus_memory_layout.memory_layout.swap_layout,
-    );
-
     let top_processes_table = create_top_processes_table(sys);
     frame.render_widget(top_processes_table, main_layout.processes_layout);
 
