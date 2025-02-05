@@ -1,15 +1,18 @@
 use ratatui::{
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     text::Line,
-    widgets::{Bar, BarChart, BarGroup, Block, BorderType, Borders},
+    widgets::{Bar, BarChart, BarGroup, Block, Borders},
 };
 use sysinfo::{CpuExt, System, SystemExt};
+
+use crate::layout::get_highlight_style;
 
 pub struct CpuBarchart<'a_> {
     pub chart: BarChart<'a_>,
     pub max_scroll: usize,
     pub real_content_length: usize,
 }
+
 pub fn create_cpu_barchart(
     sys: &System,
     layout_width: usize,
@@ -19,24 +22,7 @@ pub fn create_cpu_barchart(
     let bar_width: u16 = 7;
     let bar_gap: u16 = 2;
     let visible_bars = layout_width / (bar_width + bar_gap) as usize;
-
-    let border_style = if is_selected {
-        Style::default().fg(Color::Red)
-    } else {
-        Style::default()
-    };
-
-    let title_style = if is_selected {
-        Style::default().bold()
-    } else {
-        Style::default()
-    };
-
-    let border_type = if is_selected {
-        BorderType::Thick
-    } else {
-        BorderType::Plain
-    };
+    let highlight_style = get_highlight_style(is_selected);
 
     let cpu_data: Vec<Bar> = sys
         .cpus()
@@ -54,12 +40,12 @@ pub fn create_cpu_barchart(
         })
         .collect();
 
-    let bar_count = sys.cpus().len();
-    let max_scroll = bar_count.saturating_sub(visible_bars as usize);
-    let real_content_length = if visible_bars == bar_count {
+    let all_bar_count = sys.cpus().len();
+    let max_scroll = all_bar_count.saturating_sub(visible_bars as usize);
+    let real_content_length = if visible_bars == all_bar_count {
         0
     } else {
-        bar_count * (bar_width + bar_gap) as usize
+        all_bar_count * (bar_width + bar_gap) as usize
     };
 
     let barchart = BarChart::default()
@@ -70,10 +56,10 @@ pub fn create_cpu_barchart(
                     sys.global_cpu_info().cpu_usage().round(),
                     sys.global_cpu_info().frequency()
                 ))
-                .title_style(title_style)
+                .title_style(highlight_style.title)
                 .borders(Borders::all())
-                .border_style(border_style)
-                .border_type(border_type),
+                .border_style(highlight_style.border)
+                .border_type(highlight_style.border_type),
         )
         .data(BarGroup::default().bars(&cpu_data))
         .style(Style::default().fg(Color::Green))

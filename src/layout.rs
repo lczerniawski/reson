@@ -1,4 +1,8 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::{
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Style, Stylize},
+    widgets::{BorderType, Scrollbar, ScrollbarOrientation},
+};
 
 pub struct AppLayout {
     pub main_layout: MainLayout,
@@ -72,4 +76,48 @@ fn prepare_main_layout(inner_area: Rect) -> MainLayout {
         disk_layout: main_layout[2],
         network_layout: main_layout[3],
     }
+}
+
+pub struct HighlightStyle {
+    pub border: Style,
+    pub title: Style,
+    pub border_type: BorderType,
+}
+
+pub fn get_highlight_style(is_selected: bool) -> HighlightStyle {
+    let border_style = if is_selected {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    };
+
+    let title_style = if is_selected {
+        Style::default().bold()
+    } else {
+        Style::default()
+    };
+
+    let border_type = if is_selected {
+        BorderType::Thick
+    } else {
+        BorderType::Plain
+    };
+
+    HighlightStyle {
+        border: border_style,
+        title: title_style,
+        border_type,
+    }
+}
+
+pub fn get_horizontal_scrollbar<'a>() -> Scrollbar<'a> {
+    Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+        .track_symbol(Some("═"))
+        .thumb_symbol("■")
+        .begin_symbol(Some("◀"))
+        .end_symbol(Some("▶"))
+}
+
+pub fn get_vertical_scrollbar<'a>() -> Scrollbar<'a> {
+    Scrollbar::new(ScrollbarOrientation::VerticalRight)
 }

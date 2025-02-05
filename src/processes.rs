@@ -5,9 +5,24 @@ use ratatui::{
 };
 use sysinfo::{ProcessExt, System, SystemExt, UserExt};
 
-pub fn create_top_processes_table(sys: &System) -> Table<'_> {
-    let mut processes: Vec<_> = sys.processes().values().collect();
+use crate::layout::get_highlight_style;
 
+pub struct ProcessesTable<'a_> {
+    pub chart: Table<'a_>,
+    pub max_scroll: usize,
+    pub real_content_length: usize,
+}
+
+pub fn create_processes_table(
+    sys: &System,
+    layout_height: usize,
+    scroll_position: usize,
+    is_selected: bool,
+) -> ProcessesTable<'_> {
+    let visible_lines = layout_height;
+    let highlight_style = get_highlight_style(is_selected);
+
+    let mut processes: Vec<_> = sys.processes().values().collect();
     let total_memory = sys.total_memory() as f64;
     processes.sort_by(|a, b| {
         let a_cpu_score = a.cpu_usage() as f64;
@@ -29,7 +44,8 @@ pub fn create_top_processes_table(sys: &System) -> Table<'_> {
 
     let rows: Vec<Row> = processes
         .iter()
-        .take(10)
+        .skip(scroll_position)
+        .take(visible_lines)
         .map(|process| {
             Row::new(vec![
                 process
@@ -51,12 +67,23 @@ pub fn create_top_processes_table(sys: &System) -> Table<'_> {
         })
         .collect();
 
-    Table::new(rows)
+    let all_lines_count = processes.len();
+    let max_scroll = all_lines_count.saturating_sub(visible_lines);
+    let real_content_length = if visible_lines == all_lines_count {
+        0
+    } else {
+        all_lines_count
+    };
+
+    let table = Table::new(rows)
         .header(header)
         .block(
             Block::default()
-                .title("Top 10 Processes")
-                .borders(Borders::all()),
+                .title("Processes")
+                .title_style(highlight_style.title)
+                .borders(Borders::all())
+                .border_style(highlight_style.border)
+                .border_type(highlight_style.border_type),
         )
         .style(Style::default().fg(Color::Cyan))
         .widths(&[
@@ -67,5 +94,11 @@ pub fn create_top_processes_table(sys: &System) -> Table<'_> {
             Constraint::Percentage(15), // Time
             Constraint::Percentage(40), // Command
         ])
-        .column_spacing(1)
+        .column_spacing(1);
+
+    ProcessesTable {
+        chart: table,
+        max_scroll,
+        real_content_length,
+    }
 }
