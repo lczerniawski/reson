@@ -19,7 +19,8 @@ pub fn create_processes_table(
     scroll_position: usize,
     is_selected: bool,
 ) -> ProcessesTable<'_> {
-    let visible_lines = layout_height;
+    // -2 for border
+    let visible_lines = layout_height - 2;
     let highlight_style = get_highlight_style(is_selected);
 
     let mut processes: Vec<_> = sys.processes().values().collect();

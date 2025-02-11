@@ -4,17 +4,27 @@ use ratatui::{
 };
 use sysinfo::{DiskExt, System, SystemExt};
 
-pub fn create_top_disks_widget(sys: &System) -> Paragraph<'_> {
-    let mut disks: Vec<_> = sys.disks().iter().collect();
-    disks.sort_by(|a, b| {
-        b.available_space()
-            .partial_cmp(&a.available_space())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+use crate::layout::get_highlight_style;
 
-    let disk_data: String = disks
+pub struct DisksWidget<'a_> {
+    pub chart: Paragraph<'a_>,
+    pub max_scroll: usize,
+    pub real_content_length: usize,
+}
+
+pub fn create_disks_widget(
+    sys: &System,
+    layout_height: usize,
+    scroll_position: usize,
+    is_selected: bool,
+) -> DisksWidget {
+    // -2 for border
+    let visible_lines = layout_height - 2;
+    let highlight_style = get_highlight_style(is_selected);
+
+    let disk_data: String = sys
+        .disks()
         .iter()
-        .take(5)
         .enumerate()
         .map(|(n, disk)| {
             let used = disk.total_space() - disk.available_space();
@@ -36,10 +46,28 @@ pub fn create_top_disks_widget(sys: &System) -> Paragraph<'_> {
         .collect::<Vec<String>>()
         .join("\n");
 
-    Paragraph::new(disk_data).block(
-        Block::default()
-            .title("Top 5 Disk Usage")
-            .style(Style::default().fg(Color::Yellow))
-            .borders(Borders::all()),
-    )
+    let all_lines_count = sys.disks().len();
+    let max_scroll = all_lines_count.saturating_sub(visible_lines);
+    let real_content_length = if visible_lines >= all_lines_count {
+        0
+    } else {
+        all_lines_count
+    };
+    let paragraph = Paragraph::new(disk_data)
+        .block(
+            Block::default()
+                .title("Disk Usage")
+                .style(Style::default().fg(Color::Yellow))
+                .title_style(highlight_style.title)
+                .borders(Borders::all())
+                .border_style(highlight_style.border)
+                .border_type(highlight_style.border_type),
+        )
+        .scroll((scroll_position as u16, 0));
+
+    DisksWidget {
+        chart: paragraph,
+        max_scroll,
+        real_content_length,
+    }
 }

@@ -21,13 +21,14 @@ use crate::{
     cpu::create_cpu_barchart,
     layout::{prepare_layout, AppLayout},
 };
-use crate::{disk::create_top_disks_widget, layout::get_vertical_scrollbar};
+use crate::{disk::create_disks_widget, layout::get_vertical_scrollbar};
 
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
     cpu_scrollbar_state: CustomScrollbarState,
     processes_scrollbar_state: CustomScrollbarState,
+    disks_scrollbar_state: CustomScrollbarState,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -46,29 +47,29 @@ enum SelectedTab {
     #[strum(to_string = "Processes")]
     Processes,
 
-    #[strum(to_string = "Networks")]
-    Networks,
-
     #[strum(to_string = "Disks")]
     Disks,
+
+    #[strum(to_string = "Networks")]
+    Networks,
 }
 
 impl SelectedTab {
     fn next(&self) -> Self {
         match self {
             Self::Cpu => Self::Processes,
-            Self::Processes => Self::Networks,
-            Self::Networks => Self::Disks,
-            Self::Disks => Self::Cpu,
+            Self::Processes => Self::Disks,
+            Self::Disks => Self::Networks,
+            Self::Networks => Self::Cpu,
         }
     }
 
     fn prev(&self) -> Self {
         match self {
-            Self::Cpu => Self::Disks,
+            Self::Cpu => Self::Networks,
             Self::Processes => Self::Cpu,
-            Self::Networks => Self::Processes,
-            Self::Disks => Self::Networks,
+            Self::Disks => Self::Processes,
+            Self::Networks => Self::Disks,
         }
     }
 
@@ -156,6 +157,12 @@ impl App {
                 max_scroll: 0,
                 real_content_length: 0,
             },
+            disks_scrollbar_state: CustomScrollbarState {
+                state: ScrollbarState::new(0),
+                pos: 0,
+                max_scroll: 0,
+                real_content_length: 0,
+            },
         }
     }
 
@@ -218,12 +225,24 @@ impl App {
     fn scroll_down(&mut self) {
         if self.selected_tab.is_processes() {
             self.processes_scrollbar_state.scroll_next();
+            return;
+        }
+
+        if self.selected_tab.is_disks() {
+            self.disks_scrollbar_state.scroll_next();
+            return;
         }
     }
 
     fn scroll_up(&mut self) {
         if self.selected_tab.is_processes() {
             self.processes_scrollbar_state.scroll_prev();
+            return;
+        }
+
+        if self.selected_tab.is_disks() {
+            self.disks_scrollbar_state.scroll_prev();
+            return;
         }
     }
 
@@ -258,6 +277,7 @@ impl App {
             &app_layout.main_layout.cpu_plus_memory_layout.memory_layout,
         );
         self.render_processes(frame, sys, &app_layout.main_layout.processes_layout);
+        self.render_disks(frame, sys, &app_layout.main_layout.disk_layout);
         render(frame, sys, &app_layout.main_layout);
     }
 
@@ -322,6 +342,27 @@ impl App {
         );
     }
 
+    fn render_disks(&mut self, frame: &mut Frame, sys: &System, disks_layout: &Rect) {
+        let is_selected = self.selected_tab.is_disks();
+        let disk_widget = create_disks_widget(
+            sys,
+            disks_layout.height.into(),
+            self.disks_scrollbar_state.pos,
+            is_selected,
+        );
+        frame.render_widget(disk_widget.chart, *disks_layout);
+
+        self.disks_scrollbar_state
+            .set_values(disk_widget.max_scroll, disk_widget.real_content_length);
+        self.processes_scrollbar_state.current_pos_scroll_update();
+
+        frame.render_stateful_widget(
+            get_vertical_scrollbar(),
+            *disks_layout,
+            &mut self.disks_scrollbar_state.state,
+        );
+    }
+
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
         let footer = Block::default()
             .title(
@@ -356,9 +397,6 @@ async fn read_input_events(tx: Sender<KeyboardMessage>) {
 }
 
 fn render(frame: &mut Frame, sys: &System, main_layout: &MainLayout) {
-    let disk_widget = create_top_disks_widget(sys);
-    frame.render_widget(disk_widget, main_layout.disk_layout);
-
     let network_widget = create_top_networks_widget(sys);
     frame.render_widget(network_widget, main_layout.network_layout);
 }
