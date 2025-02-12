@@ -10,7 +10,6 @@ use crate::layout::get_highlight_style;
 pub struct ProcessesTable<'a_> {
     pub chart: Table<'a_>,
     pub max_scroll: usize,
-    pub real_content_length: usize,
 }
 
 pub fn create_processes_table(
@@ -70,12 +69,6 @@ pub fn create_processes_table(
 
     let all_lines_count = processes.len();
     let max_scroll = all_lines_count.saturating_sub(visible_lines);
-    let real_content_length = if visible_lines == all_lines_count {
-        0
-    } else {
-        all_lines_count
-    };
-
     let table = Table::new(rows)
         .header(header)
         .block(
@@ -100,6 +93,5 @@ pub fn create_processes_table(
     ProcessesTable {
         chart: table,
         max_scroll,
-        real_content_length,
     }
 }

@@ -26,10 +26,10 @@ use crate::{disk::create_disks_widget, layout::get_vertical_scrollbar};
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
-    cpu_scrollbar_state: CustomScrollbarState,
-    processes_scrollbar_state: CustomScrollbarState,
-    disks_scrollbar_state: CustomScrollbarState,
-    networks_scrollbar_state: CustomScrollbarState,
+    cpu_scrollbar_state: HorizontalScrollbarState,
+    processes_scrollbar_state: VerticalScrollbarState,
+    disks_scrollbar_state: VerticalScrollbarState,
+    networks_scrollbar_state: VerticalScrollbarState,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -96,14 +96,14 @@ impl SelectedTab {
     }
 }
 
-struct CustomScrollbarState {
+struct HorizontalScrollbarState {
     state: ScrollbarState,
     pos: usize,
     max_scroll: usize,
     real_content_length: usize,
 }
 
-impl CustomScrollbarState {
+impl HorizontalScrollbarState {
     fn scroll_next(&mut self) {
         if self.max_scroll == 0 {
             return;
@@ -140,6 +140,45 @@ impl CustomScrollbarState {
     }
 }
 
+struct VerticalScrollbarState {
+    state: ScrollbarState,
+    pos: usize,
+    max_scroll: usize,
+}
+
+impl VerticalScrollbarState {
+    fn scroll_next(&mut self) {
+        if self.max_scroll == 0 {
+            return;
+        }
+
+        self.pos = self.pos.saturating_add(1).clamp(0, self.max_scroll);
+        self.current_pos_scroll_update();
+    }
+
+    fn scroll_prev(&mut self) {
+        if self.max_scroll == 0 {
+            return;
+        }
+
+        self.pos = self.pos.saturating_sub(1);
+        self.current_pos_scroll_update();
+    }
+
+    fn set_values(&mut self, max_scroll: usize) {
+        self.max_scroll = max_scroll;
+        self.state = self.state.content_length(max_scroll);
+    }
+
+    fn current_pos_scroll_update(&mut self) {
+        if self.max_scroll == 0 {
+            return;
+        }
+
+        self.state = self.state.position(self.pos);
+    }
+}
+
 #[derive(Debug)]
 enum KeyboardMessage {
     KeyPress(KeyCode),
@@ -151,29 +190,26 @@ impl App {
         Self {
             state: AppState::Running,
             selected_tab: SelectedTab::None,
-            cpu_scrollbar_state: CustomScrollbarState {
+            cpu_scrollbar_state: HorizontalScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 max_scroll: 0,
                 real_content_length: 0,
             },
-            processes_scrollbar_state: CustomScrollbarState {
+            processes_scrollbar_state: VerticalScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 max_scroll: 0,
-                real_content_length: 0,
             },
-            disks_scrollbar_state: CustomScrollbarState {
+            disks_scrollbar_state: VerticalScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 max_scroll: 0,
-                real_content_length: 0,
             },
-            networks_scrollbar_state: CustomScrollbarState {
+            networks_scrollbar_state: VerticalScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 max_scroll: 0,
-                real_content_length: 0,
             },
         }
     }
@@ -351,10 +387,8 @@ impl App {
 
         frame.render_widget(processes_table.chart, *processes_layout);
 
-        self.processes_scrollbar_state.set_values(
-            processes_table.max_scroll,
-            processes_table.real_content_length,
-        );
+        self.processes_scrollbar_state
+            .set_values(processes_table.max_scroll);
         self.processes_scrollbar_state.current_pos_scroll_update();
 
         frame.render_stateful_widget(
@@ -375,7 +409,7 @@ impl App {
         frame.render_widget(disk_widget.chart, *disks_layout);
 
         self.disks_scrollbar_state
-            .set_values(disk_widget.max_scroll, disk_widget.real_content_length);
+            .set_values(disk_widget.max_scroll);
         self.processes_scrollbar_state.current_pos_scroll_update();
 
         frame.render_stateful_widget(
@@ -395,10 +429,8 @@ impl App {
         );
         frame.render_widget(network_widget.chart, *network_layout);
 
-        self.networks_scrollbar_state.set_values(
-            network_widget.max_scroll,
-            network_widget.real_content_length,
-        );
+        self.networks_scrollbar_state
+            .set_values(network_widget.max_scroll);
         self.networks_scrollbar_state.current_pos_scroll_update();
 
         frame.render_stateful_widget(

@@ -17,7 +17,6 @@ struct TotalNetworkStats {
 pub struct NetworksWidget<'a_> {
     pub chart: Paragraph<'a_>,
     pub max_scroll: usize,
-    pub real_content_length: usize,
 }
 
 fn format_bytes_per_second(bytes: u64) -> String {
@@ -96,11 +95,6 @@ pub fn create_networks_widget(
 
     let all_lines_count = networks.len();
     let max_scroll = all_lines_count.saturating_sub(visible_lines);
-    let real_content_length = if visible_lines >= all_lines_count {
-        0
-    } else {
-        all_lines_count
-    };
     let paragraph = Paragraph::new(network_text)
         .block(
             Block::default()
@@ -116,6 +110,5 @@ pub fn create_networks_widget(
     NetworksWidget {
         chart: paragraph,
         max_scroll,
-        real_content_length,
     }
 }

@@ -9,7 +9,6 @@ use crate::layout::get_highlight_style;
 pub struct DisksWidget<'a_> {
     pub chart: Paragraph<'a_>,
     pub max_scroll: usize,
-    pub real_content_length: usize,
 }
 
 pub fn create_disks_widget(
@@ -48,11 +47,6 @@ pub fn create_disks_widget(
 
     let all_lines_count = sys.disks().len();
     let max_scroll = all_lines_count.saturating_sub(visible_lines);
-    let real_content_length = if visible_lines >= all_lines_count {
-        0
-    } else {
-        all_lines_count
-    };
     let paragraph = Paragraph::new(disk_data)
         .block(
             Block::default()
@@ -68,6 +62,5 @@ pub fn create_disks_widget(
     DisksWidget {
         chart: paragraph,
         max_scroll,
-        real_content_length,
     }
 }
