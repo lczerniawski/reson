@@ -21,8 +21,17 @@ pub fn create_disks_widget(
     let visible_lines = layout_height - 2;
     let highlight_style = get_highlight_style(is_selected);
 
-    let disk_data: String = sys
-        .disks()
+    let mut disks: Vec<_> = sys.disks().iter().collect();
+    disks.sort_by(|a, b| {
+        let b_used = b.total_space() - b.available_space();
+        let a_used = a.total_space() - a.available_space();
+
+        b_used
+            .partial_cmp(&a_used)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let disk_data: String = disks
         .iter()
         .enumerate()
         .map(|(n, disk)| {
