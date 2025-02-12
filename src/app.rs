@@ -13,9 +13,9 @@ use ratatui::{
 use sysinfo::{System, SystemExt};
 use tokio::{sync::mpsc::Sender, time::interval};
 
-use crate::layout::{get_horizontal_scrollbar, MainLayout, MemoryLayout};
+use crate::layout::{get_horizontal_scrollbar, MemoryLayout};
 use crate::memory::create_memory_gauges;
-use crate::network::create_top_networks_widget;
+use crate::network::create_networks_widget;
 use crate::processes::create_processes_table;
 use crate::{
     cpu::create_cpu_barchart,
@@ -29,6 +29,7 @@ pub struct App {
     cpu_scrollbar_state: CustomScrollbarState,
     processes_scrollbar_state: CustomScrollbarState,
     disks_scrollbar_state: CustomScrollbarState,
+    networks_scrollbar_state: CustomScrollbarState,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +41,6 @@ enum AppState {
 
 #[derive(Default, Clone, Copy, Display, FromRepr, EnumIter)]
 enum SelectedTab {
-    #[default]
     #[strum(to_string = "CPU")]
     Cpu,
 
@@ -52,6 +52,10 @@ enum SelectedTab {
 
     #[strum(to_string = "Networks")]
     Networks,
+
+    #[default]
+    #[strum(to_string = "None")]
+    None,
 }
 
 impl SelectedTab {
@@ -60,13 +64,15 @@ impl SelectedTab {
             Self::Cpu => Self::Processes,
             Self::Processes => Self::Disks,
             Self::Disks => Self::Networks,
-            Self::Networks => Self::Cpu,
+            Self::Networks => Self::None,
+            Self::None => Self::Cpu,
         }
     }
 
     fn prev(&self) -> Self {
         match self {
-            Self::Cpu => Self::Networks,
+            Self::None => Self::Networks,
+            Self::Cpu => Self::None,
             Self::Processes => Self::Cpu,
             Self::Disks => Self::Processes,
             Self::Networks => Self::Disks,
@@ -144,7 +150,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             state: AppState::Running,
-            selected_tab: SelectedTab::Cpu,
+            selected_tab: SelectedTab::None,
             cpu_scrollbar_state: CustomScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
@@ -158,6 +164,12 @@ impl App {
                 real_content_length: 0,
             },
             disks_scrollbar_state: CustomScrollbarState {
+                state: ScrollbarState::new(0),
+                pos: 0,
+                max_scroll: 0,
+                real_content_length: 0,
+            },
+            networks_scrollbar_state: CustomScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
                 max_scroll: 0,
@@ -232,6 +244,11 @@ impl App {
             self.disks_scrollbar_state.scroll_next();
             return;
         }
+
+        if self.selected_tab.is_network() {
+            self.networks_scrollbar_state.scroll_next();
+            return;
+        }
     }
 
     fn scroll_up(&mut self) {
@@ -242,6 +259,11 @@ impl App {
 
         if self.selected_tab.is_disks() {
             self.disks_scrollbar_state.scroll_prev();
+            return;
+        }
+
+        if self.selected_tab.is_network() {
+            self.networks_scrollbar_state.scroll_prev();
             return;
         }
     }
@@ -278,7 +300,7 @@ impl App {
         );
         self.render_processes(frame, sys, &app_layout.main_layout.processes_layout);
         self.render_disks(frame, sys, &app_layout.main_layout.disk_layout);
-        render(frame, sys, &app_layout.main_layout);
+        self.render_networks(frame, sys, &app_layout.main_layout.network_layout);
     }
 
     fn render_cpu(&mut self, frame: &mut Frame, sys: &System, cpu_layout: &Rect) {
@@ -363,6 +385,29 @@ impl App {
         );
     }
 
+    fn render_networks(&mut self, frame: &mut Frame, sys: &System, network_layout: &Rect) {
+        let is_selected = self.selected_tab.is_network();
+        let network_widget = create_networks_widget(
+            sys,
+            network_layout.height.into(),
+            self.networks_scrollbar_state.pos,
+            is_selected,
+        );
+        frame.render_widget(network_widget.chart, *network_layout);
+
+        self.networks_scrollbar_state.set_values(
+            network_widget.max_scroll,
+            network_widget.real_content_length,
+        );
+        self.networks_scrollbar_state.current_pos_scroll_update();
+
+        frame.render_stateful_widget(
+            get_vertical_scrollbar(),
+            *network_layout,
+            &mut self.networks_scrollbar_state.state,
+        );
+    }
+
     fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
         let footer = Block::default()
             .title(
@@ -394,9 +439,4 @@ async fn read_input_events(tx: Sender<KeyboardMessage>) {
             }
         }
     }
-}
-
-fn render(frame: &mut Frame, sys: &System, main_layout: &MainLayout) {
-    let network_widget = create_top_networks_widget(sys);
-    frame.render_widget(network_widget, main_layout.network_layout);
 }

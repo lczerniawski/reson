@@ -5,11 +5,19 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
+use crate::layout::get_highlight_style;
+
 struct TotalNetworkStats {
     transmited_bytes: u64,
     received_bytes: u64,
     transmited_packets: u64,
     received_packets: u64,
+}
+
+pub struct NetworksWidget<'a_> {
+    pub chart: Paragraph<'a_>,
+    pub max_scroll: usize,
+    pub real_content_length: usize,
 }
 
 fn format_bytes_per_second(bytes: u64) -> String {
@@ -20,7 +28,16 @@ fn format_bytes_per_second(bytes: u64) -> String {
     }
 }
 
-pub fn create_top_networks_widget(sys: &System) -> Paragraph<'_> {
+pub fn create_networks_widget(
+    sys: &System,
+    layout_height: usize,
+    scroll_position: usize,
+    is_selected: bool,
+) -> NetworksWidget<'_> {
+    // -2 for border
+    let visible_lines = layout_height - 2;
+    let highlight_style = get_highlight_style(is_selected);
+
     let mut networks: Vec<_> = sys.networks().iter().collect();
     networks.sort_by(|a, b| {
         let a_transmited = a.1.transmitted();
@@ -39,7 +56,6 @@ pub fn create_top_networks_widget(sys: &System) -> Paragraph<'_> {
 
     let network_text = networks
         .iter()
-        .take(5)
         .map(|(network, data)| {
             format!(
                 "{}: ↑ {} KB/s ↓ {} KB/s | Packets: TX {} RX {} | MAC: {}",
@@ -71,17 +87,35 @@ pub fn create_top_networks_widget(sys: &System) -> Paragraph<'_> {
     );
 
     let title = format!(
-        "Top 5 Network Usage, Total: ↑ {} KB/s ↓ {} KB/s | Packets: TX {} RX {}",
+        "Network Usage, Total: ↑ {} KB/s ↓ {} KB/s | Packets: TX {} RX {}",
         format_bytes_per_second(total_stats.transmited_bytes),
         format_bytes_per_second(total_stats.received_bytes),
         total_stats.transmited_packets,
         total_stats.received_packets
     );
 
-    Paragraph::new(network_text).block(
-        Block::default()
-            .title(title)
-            .style(Style::default().fg(Color::LightRed))
-            .borders(Borders::all()),
-    )
+    let all_lines_count = networks.len();
+    let max_scroll = all_lines_count.saturating_sub(visible_lines);
+    let real_content_length = if visible_lines >= all_lines_count {
+        0
+    } else {
+        all_lines_count
+    };
+    let paragraph = Paragraph::new(network_text)
+        .block(
+            Block::default()
+                .title(title)
+                .style(Style::default().fg(Color::Gray))
+                .title_style(highlight_style.title)
+                .borders(Borders::all())
+                .border_style(highlight_style.border)
+                .border_type(highlight_style.border_type),
+        )
+        .scroll((scroll_position as u16, 0));
+
+    NetworksWidget {
+        chart: paragraph,
+        max_scroll,
+        real_content_length,
+    }
 }
