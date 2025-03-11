@@ -42,10 +42,11 @@ jobs:
             SHOULD_RELEASE="true"
           fi
 
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag_version=${TAG_VERSION}" >> $GITHUB_OUTPUT
-          echo "binary_name=${BINARY_NAME}" >> $GITHUB_OUTPUT
-          echo "should_release=${SHOULD_RELEASE}" >> $GITHUB_OUTPUT
+          # Use the new environment file approach
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "binary_name=${BINARY_NAME}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${SHOULD_RELEASE}" >> "$GITHUB_OUTPUT"
 
       - name: Create Release Tag
         if: steps.set_vars.outputs.should_release == 'true'
@@ -147,7 +148,7 @@ jobs:
 
           # Create archive name
           ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
-          echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_ENV
+          echo "archive_name=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
           # Create archive based on platform
           cd dist
