@@ -199,6 +199,20 @@ jobs:
           sha256sum *.tar.gz *.zip >> ../checksums.txt
           cat ../checksums.txt
 
+      - name: Generate changelog
+        id: changelog
+        uses: metcalfc/changelog-generator@v4.1.0
+        with:
+          myToken: ${{ secrets.GITHUB_TOKEN }}
+          head-ref: ${{ needs.check-version.outputs.tag_version }}
+          base-ref: ${{ github.event.before }}
+
+      - name: Get previous tag
+        id: previoustag
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -207,7 +221,8 @@ jobs:
           body: |
             Release ${{ needs.check-version.outputs.version }}
 
-            Commit message: ${{ github.event.head_commit.message }}
+            ## What's Changed
+            ${{ steps.changelog.outputs.changelog }}
 
             ## Checksums
             ```
