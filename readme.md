@@ -53,8 +53,13 @@ The current sort criterion and direction are indicated in the column header with
 
 ## Installation
 
-### Homebrew
-### Manual
+1. Download the appropriate archive for your platform from the [Releases page](https://github.com/yourusername/your-repo/releases)
+2. Extract the archive:
+   - For Linux/macOS: `tar -xzf reson_version_Platform.tar.gz`
+   - For Windows: Extract the zip file
+3. Run the executable:
+   - Linux/macOS: `./reson`
+   - Windows: Double-click `reson.exe` or run from command prompt
 
 ## Usage
 
