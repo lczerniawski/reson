@@ -137,10 +137,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: >-
-            --release
-            --target ${{ matrix.target }}
-            ${{ contains(matrix.target, 'musl') && '--target-feature=+crt-static' || '' }}
+          args: --release --target ${{ matrix.target }}
         env:
           RUSTFLAGS: ${{ contains(matrix.target, 'musl') && '-C target-feature=+crt-static' || '' }}
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: arm-linux-gnueabihf-gcc
