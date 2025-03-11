@@ -89,6 +89,7 @@ pub fn create_processes_table(
         .widths(&[
             Constraint::Percentage(15), // User
             Constraint::Percentage(10), // PID
+            Constraint::Percentage(10), // PPID
             Constraint::Percentage(10), // CPU%
             Constraint::Percentage(10), // MEM
             Constraint::Percentage(15), // Time
