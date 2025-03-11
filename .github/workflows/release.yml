@@ -6,7 +6,6 @@ on:
       - master
 
 jobs:
-  # First job: Check version and create tag if needed
   check-version:
     runs-on: ubuntu-latest
     outputs:
@@ -16,33 +15,23 @@ jobs:
       should_release: ${{ steps.set_vars.outputs.should_release }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Needed to check tags
+          fetch-depth: 0
 
       - name: Set output variables
         id: set_vars
         run: |
-          # Extract version from Cargo.toml
           VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          echo "Version from Cargo.toml: $VERSION"
           TAG_VERSION="v${VERSION}"
-
-          # Extract binary name from Cargo.toml
           BINARY_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
-          echo "Binary name: $BINARY_NAME"
 
-          # Check if tag exists
           if git rev-parse "refs/tags/$TAG_VERSION" >/dev/null 2>&1; then
-            echo "Tag $TAG_VERSION already exists, not creating a release."
             SHOULD_RELEASE="false"
           else
-            echo "Tag $TAG_VERSION does not exist, proceeding with release."
             SHOULD_RELEASE="true"
           fi
 
-          # Use the new environment file approach
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag_version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
           echo "binary_name=${BINARY_NAME}" >> "$GITHUB_OUTPUT"
@@ -56,48 +45,53 @@ jobs:
           git tag -a ${{ steps.set_vars.outputs.tag_version }} -m "Release ${{ steps.set_vars.outputs.tag_version }}"
           git push origin ${{ steps.set_vars.outputs.tag_version }}
 
-  # Build for selected platforms (Windows x64, Linux x64, macOS x64/ARM64)
-  build-standard:
+  build-and-release:
     needs: check-version
     if: needs.check-version.outputs.should_release == 'true'
     strategy:
-      fail-fast: false # Continue with other builds if one fails
+      fail-fast: false
       matrix:
         include:
-          # Windows x64 build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: Windows_x86_64
             extension: .exe
+            use_cross: false
 
-          # macOS builds (x64 and ARM64)
           - os: macos-latest
             target: x86_64-apple-darwin
             platform: Darwin_x86_64
             extension: ""
+            use_cross: false
 
           - os: macos-latest
             target: aarch64-apple-darwin
             platform: Darwin_arm64
             extension: ""
+            use_cross: false
 
-          # Linux x64 build
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             platform: Linux_x86_64
             extension: ""
+            use_cross: true
 
-          # Linux ARM build
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             platform: Linux_aarch64
             extension: ""
+            use_cross: true
+
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+            platform: Linux_armv7
+            extension: ""
+            use_cross: true
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -107,102 +101,53 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Install musl-tools (Linux)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross
 
-      - name: Setup Rust target (Linux)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          rustup target add x86_64-unknown-linux-musl
+      - name: Install zip (Windows)
+        if: runner.os == 'Windows'
+        run: choco install zip -y
 
-      # Install zip on Windows
-      - name: Install zip on Windows
-        if: contains(matrix.platform, 'Windows')
-        run: |
-          choco install zip -y
+      - name: Build (standard)
+        if: "!matrix.use_cross"
+        run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Install cross-compilation tools
-        if: contains(matrix.target, 'arm')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabihf \
-            g++-arm-linux-gnueabihf \
-            musl-tools
-          rustup target add armv7-unknown-linux-musleabihf
-          rustup target add aarch64-unknown-linux-musl
-
-          # Create symbolic links for musl builds
-          sudo ln -s /usr/bin/aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-musl-gcc
-          sudo ln -s /usr/bin/arm-linux-gnueabihf-gcc /usr/bin/arm-linux-musleabihf-gcc
-
-      # Building for the specified target
-      - name: Build release binary
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target ${{ matrix.target }}
+      - name: Build (cross)
+        if: matrix.use_cross
+        run: cross build --release --target ${{ matrix.target }}
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-musl-gcc
-          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: arm-linux-musleabihf-gcc
-          CC_aarch64_unknown_linux_musl: aarch64-linux-musl-gcc
-          CC_armv7_unknown_linux_musleabihf: arm-linux-musleabihf-gcc
 
-      # Create distribution package
-      - name: Create distribution directory
+      - name: Prepare distribution
+        shell: bash
         run: |
           BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
           VERSION=${{ needs.check-version.outputs.version }}
           PLATFORM=${{ matrix.platform }}
           TARGET=${{ matrix.target }}
           EXT="${{ matrix.extension }}"
+          ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
 
-          echo "Creating distribution for $BINARY_NAME v$VERSION ($PLATFORM)"
-
-          # Create dist directory
           mkdir -p dist
-
-          # Copy binary with correct extension
           cp "target/$TARGET/release/${BINARY_NAME}${EXT}" "dist/${BINARY_NAME}${EXT}"
 
-          # Set execute permission for non-Windows
-          if [[ "$PLATFORM" != *"Windows"* ]]; then
-            chmod +x "dist/${BINARY_NAME}${EXT}"
-          fi
+          [[ "$PLATFORM" != *"Windows"* ]] && chmod +x "dist/${BINARY_NAME}${EXT}"
 
-          # Copy README and LICENSE if they exist
-          if [ -f "README.md" ]; then
-            cp "README.md" "dist/"
-          elif [ -f "readme.md" ]; then
-            cp "readme.md" "dist/"
-          fi
-          if [ -f "LICENSE" ]; then
-            cp "LICENSE" "dist/"
-          fi
+          cp README.md dist/ 2>/dev/null || true
+          cp readme.md dist/ 2>/dev/null || true
+          cp LICENSE dist/ 2>/dev/null || true
 
-          # Create archive name
-          ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
-          echo "archive_name=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
-
-          # Create archive based on platform
           cd dist
           if [[ "$PLATFORM" == *"Windows"* ]]; then
-            zip -r "../${ARCHIVE_NAME}.zip" ./*
+            zip -r "../$ARCHIVE_NAME.zip" .
           else
-            tar -czf "../${ARCHIVE_NAME}.tar.gz" ./*
+            tar -czf "../$ARCHIVE_NAME.tar.gz" .
           fi
-          cd ..
-        shell: bash
 
-      # Upload archives as artifacts
-      - name: Upload archive
-        uses: actions/upload-artifact@v4
+          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.archive_name }}
           path: |
@@ -210,34 +155,27 @@ jobs:
             ${{ env.archive_name }}.tar.gz
           if-no-files-found: error
 
-  # Create the release with all archives
   create-release:
-    needs: [check-version, build-standard]
-    if: needs.check-version.outputs.should_release == 'true'
+    needs: [check-version, build-and-release]
     runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_release == 'true'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: ./artifacts
 
-      - name: Move archives to root directory
+      - name: Prepare release files
         run: |
           mkdir -p ./releases
           find ./artifacts -name "*.zip" -o -name "*.tar.gz" | xargs -I{} cp {} ./releases/
-          ls -la ./releases
 
-      - name: Generate checksums
-        run: |
           cd ./releases
           echo "# Checksums for ${{ needs.check-version.outputs.binary_name }} v${{ needs.check-version.outputs.version }}" > ../checksums.txt
           echo "" >> ../checksums.txt
-          sha256sum *.tar.gz *.zip >> ../checksums.txt
-          cat ../checksums.txt
+          sha256sum * >> ../checksums.txt
 
       - name: Generate changelog
         id: changelog
@@ -247,14 +185,7 @@ jobs:
           head-ref: ${{ needs.check-version.outputs.tag_version }}
           base-ref: ${{ github.event.before }}
 
-      - name: Get previous tag
-        id: previoustag
-        run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          echo "tag=$PREV_TAG" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.check-version.outputs.tag_version }}
           name: Release ${{ needs.check-version.outputs.version }}
@@ -268,11 +199,8 @@ jobs:
             ```
             $(cat checksums.txt)
             ```
-          draft: false
-          prerelease: false
           files: |
-            ./releases/*.tar.gz
-            ./releases/*.zip
+            ./releases/*
             ./checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
