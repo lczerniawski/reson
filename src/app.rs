@@ -13,7 +13,6 @@ use ratatui::{
 use sysinfo::{System, SystemExt};
 use tokio::{sync::mpsc::Sender, time::interval};
 
-use crate::layout::{get_horizontal_scrollbar, MemoryLayout};
 use crate::memory::create_memory_gauges;
 use crate::network::create_networks_widget;
 use crate::processes::create_processes_table;
@@ -22,6 +21,10 @@ use crate::{
     layout::{is_within_rect, prepare_layout, AppLayout},
 };
 use crate::{disk::create_disks_widget, layout::get_vertical_scrollbar};
+use crate::{
+    layout::{get_horizontal_scrollbar, MemoryLayout},
+    processes::{ProcessColumn, SortDirection},
+};
 
 pub struct App {
     state: AppState,
@@ -29,6 +32,7 @@ pub struct App {
     selected_tab: SelectedTab,
     cpu_scrollbar_state: HorizontalScrollbarState,
     processes_scrollbar_state: VerticalScrollbarState,
+    process_sort_state: Option<(ProcessColumn, SortDirection)>,
     disks_scrollbar_state: VerticalScrollbarState,
     networks_scrollbar_state: VerticalScrollbarState,
 }
@@ -213,6 +217,7 @@ impl App {
                 pos: 0,
                 max_scroll: 0,
             },
+            process_sort_state: None,
             disks_scrollbar_state: VerticalScrollbarState {
                 state: ScrollbarState::new(0),
                 pos: 0,
@@ -264,6 +269,31 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
                 KeyCode::Tab => self.next_tab(),
                 KeyCode::BackTab => self.prev_tab(),
+                KeyCode::Char('1') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::User)
+                }
+                KeyCode::Char('2') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::PID)
+                }
+                KeyCode::Char('3') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::PPID)
+                }
+                KeyCode::Char('4') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::CPU)
+                }
+                KeyCode::Char('5') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::Memory)
+                }
+                KeyCode::Char('6') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::Time)
+                }
+                KeyCode::Char('7') if self.selected_tab.is_processes() => {
+                    self.toggle_sort_column(ProcessColumn::Command)
+                }
+                // Reset sorting if 'r' is pressed
+                KeyCode::Char('r') if self.selected_tab.is_processes() => {
+                    self.process_sort_state = None;
+                }
                 _ => {}
             },
             InputMessage::MouseScroll { direction } => match direction {
@@ -274,6 +304,27 @@ impl App {
             },
             InputMessage::MouseMoved { position } => self.handle_mouse_moved(*position),
             InputMessage::Quit => self.quit(),
+        }
+    }
+
+    fn toggle_sort_column(&mut self, column: ProcessColumn) {
+        // Toggle through: None -> Ascending -> Descending -> None
+        match &self.process_sort_state {
+            Some((current_column, direction)) if *current_column == column => {
+                // If column is already sorted, toggle direction or remove sort
+                match direction {
+                    SortDirection::Ascending => {
+                        self.process_sort_state = Some((column, SortDirection::Descending));
+                    }
+                    SortDirection::Descending => {
+                        self.process_sort_state = None;
+                    }
+                }
+            }
+            _ => {
+                // If column is not sorted yet or different column, start with ascending
+                self.process_sort_state = Some((column, SortDirection::Ascending));
+            }
         }
     }
 
@@ -424,6 +475,7 @@ impl App {
             processes_layout.height.into(),
             self.processes_scrollbar_state.pos,
             is_selected,
+            self.process_sort_state,
         );
 
         frame.render_widget(processes_table.chart, *processes_layout);
@@ -482,10 +534,15 @@ impl App {
     }
 
     fn render_footer(&self, frame: &mut Frame, footer_area: &Rect) {
+        let footer_text = if self.selected_tab.is_processes() {
+            "1-7: Sort columns | r: Reset sort | Tab: Next tab | h/j/k/l: Scroll | q: Quit"
+        } else {
+            // Regular footer text
+            "Tab: Next tab | h/j/k/l: Scroll | q: Quit"
+        };
+
         let footer = Block::default()
-            .title(
-                "Press Tab for next tab, Shift + Tab for previous tab | Press ◄ ▼ ▲ ► or h j k l to scroll | Press q to quit",
-            )
+            .title(footer_text)
             .title_alignment(Alignment::Center);
         frame.render_widget(footer, *footer_area);
     }

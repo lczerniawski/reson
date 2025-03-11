@@ -28,7 +28,6 @@ The name "Reson" is derived from combining the words "resource" and "monitor."
 - [ ] Add multiple filter support
 
 ## Installation
-
 TODO
 
 ## Usage
