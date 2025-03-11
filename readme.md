@@ -52,7 +52,9 @@ The process table features comprehensive sorting capabilities:
 The current sort criterion and direction are indicated in the column header with an arrow symbol.
 
 ## Installation
-TODO
+
+### Homebrew
+### Manual
 
 ## Usage
 
@@ -68,7 +70,7 @@ Once running, you can use the following keys:
 ## Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check the [issues page](https://github.com/yourusername/reson/issues) if you want to contribute.
+Feel free to check the [issues page](https://github.com/lczerniawski/reson/issues) if you want to contribute.
 
 ## License
 
