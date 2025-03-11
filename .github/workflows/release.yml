@@ -149,7 +149,7 @@ jobs:
           # Create archive based on platform
           cd dist
           if [[ "$PLATFORM" == *"Windows"* ]]; then
-            zip -r "../${ARCHIVE_NAME}.zip" ./*
+            powershell -Command "Compress-Archive -Path * -DestinationPath \"../${ARCHIVE_NAME}.zip\""
           else
             tar -czf "../${ARCHIVE_NAME}.tar.gz" ./*
           fi
