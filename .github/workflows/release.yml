@@ -128,9 +128,18 @@ jobs:
         if: contains(matrix.target, 'arm')
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf \
+            musl-tools
           rustup target add armv7-unknown-linux-musleabihf
           rustup target add aarch64-unknown-linux-musl
+
+          # Create symbolic links for musl builds
+          sudo ln -s /usr/bin/aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-musl-gcc
+          sudo ln -s /usr/bin/arm-linux-gnueabihf-gcc /usr/bin/arm-linux-musleabihf-gcc
 
       # Building for the specified target
       - name: Build release binary
