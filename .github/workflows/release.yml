@@ -1,4 +1,4 @@
-name: Build and Release
+name: Multi-Platform Build and Release
 
 on:
   push:
@@ -6,8 +6,78 @@ on:
       - master
 
 jobs:
-  build-and-release:
+  # First job: Check version and create tag if needed
+  check-version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_version: ${{ steps.version.outputs.tag_version }}
+      binary_name: ${{ steps.binary.outputs.name }}
+      should_release: ${{ steps.tag_check.outputs.should_release }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Needed to check tags
+
+      - name: Get version from Cargo.toml
+        id: version
+        run: |
+          # Extract version from Cargo.toml
+          VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Version from Cargo.toml: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag_version=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get binary name from Cargo.toml
+        id: binary
+        run: |
+          # Extract binary name from Cargo.toml
+          BINARY_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
+          echo "Binary name: $BINARY_NAME"
+          echo "name=$BINARY_NAME" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: tag_check
+        run: |
+          TAG_VERSION="v$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
+          if git rev-parse "refs/tags/$TAG_VERSION" >/dev/null 2>&1; then
+            echo "Tag $TAG_VERSION already exists, not creating a release."
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $TAG_VERSION does not exist, proceeding with release."
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release Tag
+        if: steps.tag_check.outputs.should_release == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a ${{ steps.version.outputs.tag_version }} -m "Release ${{ steps.version.outputs.tag_version }}"
+          git push origin ${{ steps.version.outputs.tag_version }}
+
+  # Second job: Build binaries for multiple platforms
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            extension: ""
+          - os: macos-latest
+            platform: macos
+            extension: ""
+          - os: windows-latest
+            platform: windows
+            extension: ".exe"
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -18,26 +88,6 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
-
-      - name: Get version from Cargo.toml
-        id: version
-        run: |
-          # Extract version from Cargo.toml
-          VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          echo "Version from Cargo.toml: $VERSION"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "TAG_VERSION=v$VERSION" >> $GITHUB_ENV
-
-      - name: Check if tag exists
-        id: tag_check
-        run: |
-          if git rev-parse "refs/tags/$TAG_VERSION" >/dev/null 2>&1; then
-            echo "Tag $TAG_VERSION already exists, not creating a release."
-            echo "TAG_EXISTS=true" >> $GITHUB_ENV
-          else
-            echo "Tag $TAG_VERSION does not exist, proceeding with release."
-            echo "TAG_EXISTS=false" >> $GITHUB_ENV
-          fi
 
       - name: Build release binary
         uses: actions-rs/cargo@v1
@@ -51,35 +101,60 @@ jobs:
           command: test
           args: --release
 
-      - name: Get binary name from Cargo.toml
-        id: binary_name
+      - name: Prepare binary for upload
+        id: prepare_binary
+        shell: bash
         run: |
-          # Extract binary name from Cargo.toml (assuming it's the package name)
-          BINARY_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
-          echo "Binary name: $BINARY_NAME"
-          echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
+          BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
+          VERSION=${{ needs.check-version.outputs.version }}
+          PLATFORM=${{ matrix.platform }}
+          EXT=${{ matrix.extension }}
 
-      - name: Create Release Tag
-        if: env.TAG_EXISTS == 'false'
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git tag -a $TAG_VERSION -m "Release $TAG_VERSION"
-          git push origin $TAG_VERSION
+          ARTIFACT_NAME="${BINARY_NAME}-${VERSION}-${PLATFORM}${EXT}"
+
+          if [ "$PLATFORM" = "windows" ]; then
+            cp "target/release/${BINARY_NAME}${EXT}" "$ARTIFACT_NAME"
+          else
+            cp "target/release/${BINARY_NAME}" "$ARTIFACT_NAME"
+          fi
+
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload binary as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.prepare_binary.outputs.artifact_name }}
+          path: ${{ steps.prepare_binary.outputs.artifact_name }}
+          retention-days: 1
+
+  # Third job: Create the release with all binaries
+  create-release:
+    needs: [check-version, build]
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: List downloaded artifacts
+        run: find . -type f | grep -v "\.git"
 
       - name: Create GitHub Release
-        if: env.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.TAG_VERSION }}
-          name: Release ${{ env.VERSION }}
+          tag_name: ${{ needs.check-version.outputs.tag_version }}
+          name: Release ${{ needs.check-version.outputs.version }}
           body: |
-            Release ${{ env.VERSION }}
+            Release ${{ needs.check-version.outputs.version }}
 
             Commit message: ${{ github.event.head_commit.message }}
           draft: false
           prerelease: false
           files: |
-            target/release/${{ env.BINARY_NAME }}
+            **/${{ needs.check-version.outputs.binary_name }}-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
