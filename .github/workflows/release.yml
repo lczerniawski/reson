@@ -58,7 +58,7 @@ jobs:
           git tag -a ${{ steps.version.outputs.tag_version }} -m "Release ${{ steps.version.outputs.tag_version }}"
           git push origin ${{ steps.version.outputs.tag_version }}
 
-  # Build for standard platforms (Windows x64/x86, macOS, Linux)
+  # Build for selected platforms (Windows x64, Linux x64, macOS x64/ARM64)
   build-standard:
     needs: check-version
     if: needs.check-version.outputs.should_release == 'true'
@@ -66,18 +66,13 @@ jobs:
       fail-fast: false # Continue with other builds if one fails
       matrix:
         include:
-          # Windows builds (standard targets)
+          # Windows x64 build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: Windows_x86_64
             extension: .exe
 
-          - os: windows-latest
-            target: i686-pc-windows-msvc
-            platform: Windows_32-bit
-            extension: .exe
-
-          # macOS builds (standard targets)
+          # macOS builds (x64 and ARM64)
           - os: macos-latest
             target: x86_64-apple-darwin
             platform: Darwin_x86_64
@@ -88,7 +83,7 @@ jobs:
             platform: Darwin_arm64
             extension: ""
 
-          # Linux builds (standard targets)
+          # Linux x64 build
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform: Linux_x86_64
@@ -178,146 +173,9 @@ jobs:
           path: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
           retention-days: 1
 
-  # Build Linux ARM and additional targets using cross
-  build-cross:
-    needs: check-version
-    if: needs.check-version.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux variants
-          - target: aarch64-unknown-linux-gnu
-            platform: Linux_arm64
-            extension: ""
-
-          - target: armv7-unknown-linux-gnueabihf
-            platform: Linux_armv7
-            extension: ""
-
-          - target: i686-unknown-linux-gnu
-            platform: Linux_32-bit
-            extension: ""
-
-          # Windows ARM (cross-compiled from Linux)
-          - target: aarch64-pc-windows-msvc
-            platform: Windows_arm64
-            extension: ".exe"
-
-          # For Windows ARM, we use a special approach
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev musl-tools
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          profile: minimal
-          override: true
-
-      - name: Install cross
-        run: cargo install cross
-
-      - name: Build with cross
-        run: |
-          cross build --target ${{ matrix.target }} --release || cargo build --target ${{ matrix.target }} --release
-
-      - name: Create distribution directory
-        id: create_dist
-        shell: bash
-        run: |
-          BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
-          VERSION=${{ needs.check-version.outputs.version }}
-          PLATFORM=${{ matrix.platform }}
-          TARGET=${{ matrix.target }}
-          EXT="${{ matrix.extension }}"
-
-          # Create dist directory
-          mkdir -p dist
-
-          # Check if binary exists
-          if [ -f "target/$TARGET/release/${BINARY_NAME}${EXT}" ]; then
-            cp "target/$TARGET/release/${BINARY_NAME}${EXT}" "dist/${BINARY_NAME}${EXT}"
-            echo "Binary found and copied"
-          else
-            echo "Warning: Binary not found at target/$TARGET/release/${BINARY_NAME}${EXT}"
-            ls -la "target/$TARGET/release/" || echo "Directory does not exist"
-
-            # For Windows ARM targets, create a placeholder if build failed
-            if [[ "$PLATFORM" == *"Windows_arm"* ]]; then
-              echo "Creating Windows ARM placeholder binary"
-              echo "This is a placeholder. The actual Windows ARM build is not available." > "dist/${BINARY_NAME}${EXT}.txt"
-            else
-              # For other targets, fail if binary not found
-              exit 1
-            fi
-          fi
-
-          # Set execute permission for Linux binaries
-          if [[ "$PLATFORM" == *"Linux"* ]]; then
-            chmod +x "dist/${BINARY_NAME}${EXT}" || echo "Could not set executable bit"
-          fi
-
-          # Copy README and LICENSE if they exist
-          if [ -f "README.md" ]; then
-            cp "README.md" "dist/"
-          fi
-          if [ -f "LICENSE" ]; then
-            cp "LICENSE" "dist/"
-          fi
-
-          # Create archive name
-          ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
-          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
-
-          # Create archive based on platform
-          cd dist
-          if [[ "$PLATFORM" == *"Windows"* ]]; then
-            zip -r "../${ARCHIVE_NAME}.zip" ./*
-          else
-            tar -czf "../${ARCHIVE_NAME}.tar.gz" ./*
-          fi
-          cd ..
-
-          # Show created archive
-          if [[ "$PLATFORM" == *"Windows"* ]]; then
-            ls -la "${ARCHIVE_NAME}.zip"
-          else
-            ls -la "${ARCHIVE_NAME}.tar.gz"
-          fi
-
-      # Upload Windows archives
-      - name: Upload Windows archive
-        if: contains(matrix.platform, 'Windows')
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.create_dist.outputs.archive_name }}.zip
-          path: ${{ steps.create_dist.outputs.archive_name }}.zip
-          retention-days: 1
-          if-no-files-found: warn
-
-      # Upload Linux archives
-      - name: Upload Linux archive
-        if: contains(matrix.platform, 'Linux')
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
-          path: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
-          retention-days: 1
-          if-no-files-found: warn
-
   # Create the release with all archives
   create-release:
-    needs: [check-version, build-standard, build-cross]
+    needs: [check-version, build-standard]
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
