@@ -83,7 +83,7 @@ jobs:
 
           # Linux x64 build
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-msul
             platform: Linux_x86_64
             extension: ""
 
@@ -101,6 +101,17 @@ jobs:
           profile: minimal
           override: true
 
+      - name: Install musl-tools (Linux)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Setup Rust target (Linux)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+
       # Install zip on Windows
       - name: Install zip on Windows
         if: contains(matrix.platform, 'Windows')
@@ -112,7 +123,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target ${{ matrix.target }}
+          args: >-
+            --release
+            --target ${{ matrix.target }}
+            ${{ matrix.target == 'x86_64-unknown-linux-musl' && '--target x86_64-unknown-linux-musl' || '' }}
+        env:
+          RUSTFLAGS: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-C target-feature=+crt-static' || '' }}
 
       # Create distribution package
       - name: Create distribution directory
