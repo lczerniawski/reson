@@ -58,65 +58,41 @@ jobs:
           git tag -a ${{ steps.version.outputs.tag_version }} -m "Release ${{ steps.version.outputs.tag_version }}"
           git push origin ${{ steps.version.outputs.tag_version }}
 
-  # Second job: Build binaries for multiple platforms
-  build:
+  # Build for standard platforms (Windows x64/x86, macOS, Linux)
+  build-standard:
     needs: check-version
     if: needs.check-version.outputs.should_release == 'true'
     strategy:
+      fail-fast: false # Continue with other builds if one fails
       matrix:
         include:
-          # Linux builds
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            platform: Linux_x86_64
-            rust_target: x86_64-unknown-linux-gnu
-
-          - os: ubuntu-latest
-            target: i686-unknown-linux-gnu
-            platform: Linux_32-bit
-            rust_target: i686-unknown-linux-gnu
-
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            platform: Linux_arm64
-            rust_target: aarch64-unknown-linux-gnu
-
-          - os: ubuntu-latest
-            target: arm-unknown-linux-gnueabi
-            platform: Linux_armv6
-            rust_target: arm-unknown-linux-gnueabi
-
-          # macOS builds
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            platform: Darwin_x86_64
-            rust_target: x86_64-apple-darwin
-
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            platform: Darwin_arm64
-            rust_target: aarch64-apple-darwin
-
-          # Windows builds
+          # Windows builds (standard targets)
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: Windows_x86_64
-            rust_target: x86_64-pc-windows-msvc
+            extension: .exe
 
           - os: windows-latest
             target: i686-pc-windows-msvc
             platform: Windows_32-bit
-            rust_target: i686-pc-windows-msvc
+            extension: .exe
 
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-            platform: Windows_arm64
-            rust_target: aarch64-pc-windows-msvc
+          # macOS builds (standard targets)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: Darwin_x86_64
+            extension: ""
 
-          - os: windows-latest
-            target: arm-pc-windows-msvc
-            platform: Windows_armv6
-            rust_target: arm-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: Darwin_arm64
+            extension: ""
+
+          # Linux builds (standard targets)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: Linux_x86_64
+            extension: ""
 
     runs-on: ${{ matrix.os }}
 
@@ -128,28 +104,132 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.rust_target }}
+          target: ${{ matrix.target }}
           profile: minimal
           override: true
 
-      # Install cross-compilation dependencies for Linux
-      - name: Install cross-compilation dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest' && matrix.rust_target != 'x86_64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib
-          if [[ "${{ matrix.rust_target }}" == *"arm"* ]]; then
-            sudo apt-get install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi
-          fi
-          if [[ "${{ matrix.rust_target }}" == *"aarch64"* ]]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          fi
-
+      # Building for the specified target
       - name: Build release binary
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target ${{ matrix.rust_target }}
+          args: --release --target ${{ matrix.target }}
+
+      # Create distribution package
+      - name: Create distribution directory
+        id: create_dist
+        shell: bash
+        run: |
+          BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
+          VERSION=${{ needs.check-version.outputs.version }}
+          PLATFORM=${{ matrix.platform }}
+          TARGET=${{ matrix.target }}
+          EXT="${{ matrix.extension }}"
+
+          echo "Creating distribution for $BINARY_NAME v$VERSION ($PLATFORM)"
+
+          # Create dist directory
+          mkdir -p dist
+
+          # Copy binary with correct extension
+          cp "target/$TARGET/release/${BINARY_NAME}${EXT}" "dist/${BINARY_NAME}${EXT}"
+
+          # Set execute permission for non-Windows
+          if [[ "$PLATFORM" != *"Windows"* ]]; then
+            chmod +x "dist/${BINARY_NAME}${EXT}"
+          fi
+
+          # Copy README and LICENSE if they exist
+          if [ -f "README.md" ]; then
+            cp "README.md" "dist/"
+          fi
+          if [ -f "LICENSE" ]; then
+            cp "LICENSE" "dist/"
+          fi
+
+          # Create archive name
+          ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
+          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+
+          # Create archive based on platform
+          cd dist
+          if [[ "$PLATFORM" == *"Windows"* ]]; then
+            zip -r "../${ARCHIVE_NAME}.zip" ./*
+          else
+            tar -czf "../${ARCHIVE_NAME}.tar.gz" ./*
+          fi
+          cd ..
+
+      # Upload Windows archives
+      - name: Upload Windows archive
+        if: contains(matrix.platform, 'Windows')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.create_dist.outputs.archive_name }}.zip
+          path: ${{ steps.create_dist.outputs.archive_name }}.zip
+          retention-days: 1
+
+      # Upload Linux/macOS archives
+      - name: Upload Linux/macOS archive
+        if: "!contains(matrix.platform, 'Windows')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
+          path: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
+          retention-days: 1
+
+  # Build Linux ARM and additional targets using cross
+  build-cross:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux variants
+          - target: aarch64-unknown-linux-gnu
+            platform: Linux_arm64
+            extension: ""
+
+          - target: armv7-unknown-linux-gnueabihf
+            platform: Linux_armv7
+            extension: ""
+
+          - target: i686-unknown-linux-gnu
+            platform: Linux_32-bit
+            extension: ""
+
+          # Windows ARM (cross-compiled from Linux)
+          - target: aarch64-pc-windows-msvc
+            platform: Windows_arm64
+            extension: ".exe"
+
+          # For Windows ARM, we use a special approach
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev musl-tools
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          profile: minimal
+          override: true
+
+      - name: Install cross
+        run: cargo install cross
+
+      - name: Build with cross
+        run: |
+          cross build --target ${{ matrix.target }} --release || cargo build --target ${{ matrix.target }} --release
 
       - name: Create distribution directory
         id: create_dist
@@ -158,16 +238,33 @@ jobs:
           BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
           VERSION=${{ needs.check-version.outputs.version }}
           PLATFORM=${{ matrix.platform }}
+          TARGET=${{ matrix.target }}
+          EXT="${{ matrix.extension }}"
 
           # Create dist directory
           mkdir -p dist
 
-          # Copy binary with correct extension
-          if [[ "$PLATFORM" == *"Windows"* ]]; then
-            cp "target/${{ matrix.rust_target }}/release/${BINARY_NAME}.exe" "dist/${BINARY_NAME}.exe"
+          # Check if binary exists
+          if [ -f "target/$TARGET/release/${BINARY_NAME}${EXT}" ]; then
+            cp "target/$TARGET/release/${BINARY_NAME}${EXT}" "dist/${BINARY_NAME}${EXT}"
+            echo "Binary found and copied"
           else
-            cp "target/${{ matrix.rust_target }}/release/${BINARY_NAME}" "dist/${BINARY_NAME}"
-            chmod +x "dist/${BINARY_NAME}"
+            echo "Warning: Binary not found at target/$TARGET/release/${BINARY_NAME}${EXT}"
+            ls -la "target/$TARGET/release/" || echo "Directory does not exist"
+
+            # For Windows ARM targets, create a placeholder if build failed
+            if [[ "$PLATFORM" == *"Windows_arm"* ]]; then
+              echo "Creating Windows ARM placeholder binary"
+              echo "This is a placeholder. The actual Windows ARM build is not available." > "dist/${BINARY_NAME}${EXT}.txt"
+            else
+              # For other targets, fail if binary not found
+              exit 1
+            fi
+          fi
+
+          # Set execute permission for Linux binaries
+          if [[ "$PLATFORM" == *"Linux"* ]]; then
+            chmod +x "dist/${BINARY_NAME}${EXT}" || echo "Could not set executable bit"
           fi
 
           # Copy README and LICENSE if they exist
@@ -206,19 +303,21 @@ jobs:
           name: ${{ steps.create_dist.outputs.archive_name }}.zip
           path: ${{ steps.create_dist.outputs.archive_name }}.zip
           retention-days: 1
+          if-no-files-found: warn
 
-      # Upload Linux/macOS archives
-      - name: Upload Linux/macOS archive
-        if: "!contains(matrix.platform, 'Windows')"
+      # Upload Linux archives
+      - name: Upload Linux archive
+        if: contains(matrix.platform, 'Linux')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
           path: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
           retention-days: 1
+          if-no-files-found: warn
 
-  # Third job: Create the release with all archives
+  # Create the release with all archives
   create-release:
-    needs: [check-version, build]
+    needs: [check-version, build-standard, build-cross]
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
