@@ -4,11 +4,33 @@ use ratatui::{
     widgets::{BorderType, Scrollbar, ScrollbarOrientation},
 };
 
+#[derive(Clone)]
 pub struct AppLayout {
     pub main_layout: MainLayout,
     pub footer_area: Rect,
 }
 
+impl AppLayout {
+    pub fn empty() -> AppLayout {
+        AppLayout {
+            main_layout: MainLayout {
+                cpu_plus_memory_layout: CpuMemoryLayout {
+                    cpu_layout: Rect::default(),
+                    memory_layout: MemoryLayout {
+                        ram_layout: Rect::default(),
+                        swap_layout: Rect::default(),
+                    },
+                },
+                processes_layout: Rect::default(),
+                disk_layout: Rect::default(),
+                network_layout: Rect::default(),
+            },
+            footer_area: Rect::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct MainLayout {
     pub cpu_plus_memory_layout: CpuMemoryLayout,
     pub processes_layout: Rect,
@@ -16,11 +38,13 @@ pub struct MainLayout {
     pub network_layout: Rect,
 }
 
+#[derive(Clone)]
 pub struct CpuMemoryLayout {
     pub cpu_layout: Rect,
     pub memory_layout: MemoryLayout,
 }
 
+#[derive(Clone)]
 pub struct MemoryLayout {
     pub ram_layout: Rect,
     pub swap_layout: Rect,
@@ -40,6 +64,11 @@ pub fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
         main_layout: prepare_main_layout(main_area),
         footer_area,
     }
+}
+
+pub fn is_within_rect(pos: (u16, u16), rect: &Rect) -> bool {
+    let (x, y) = pos;
+    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
 fn prepare_main_layout(inner_area: Rect) -> MainLayout {

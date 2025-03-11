@@ -25,7 +25,6 @@ The name "Reson" is derived from combining the words "resource" and "monitor."
 - **Responsive Layout:** Automatic layout update based on terminal size.
 
 ## To Do
-- [ ] Implement Mouse Support
 - [ ] Add multiple filter support
 
 ## Installation

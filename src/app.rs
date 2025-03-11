@@ -19,12 +19,13 @@ use crate::network::create_networks_widget;
 use crate::processes::create_processes_table;
 use crate::{
     cpu::create_cpu_barchart,
-    layout::{prepare_layout, AppLayout},
+    layout::{is_within_rect, prepare_layout, AppLayout},
 };
 use crate::{disk::create_disks_widget, layout::get_vertical_scrollbar};
 
 pub struct App {
     state: AppState,
+    layout_clone: AppLayout,
     selected_tab: SelectedTab,
     cpu_scrollbar_state: HorizontalScrollbarState,
     processes_scrollbar_state: VerticalScrollbarState,
@@ -180,15 +181,26 @@ impl VerticalScrollbarState {
 }
 
 #[derive(Debug)]
-enum KeyboardMessage {
+enum InputMessage {
     KeyPress(KeyCode),
+    MouseScroll { direction: MouseScrollDirection },
+    MouseMoved { position: (u16, u16) },
     Quit,
+}
+
+#[derive(Debug)]
+enum MouseScrollDirection {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 impl App {
     pub fn new() -> Self {
         Self {
             state: AppState::Running,
+            layout_clone: AppLayout::empty(),
             selected_tab: SelectedTab::None,
             cpu_scrollbar_state: HorizontalScrollbarState {
                 state: ScrollbarState::new(0),
@@ -219,7 +231,7 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         sys: &mut System,
     ) -> Result<()> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<KeyboardMessage>(10);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<InputMessage>(10);
 
         let input_handler = tokio::spawn(read_input_events(tx.clone()));
 
@@ -243,9 +255,9 @@ impl App {
         Ok(())
     }
 
-    fn handle_events(&mut self, message: &KeyboardMessage) {
+    fn handle_events(&mut self, message: &InputMessage) {
         match message {
-            KeyboardMessage::KeyPress(code) => match code {
+            InputMessage::KeyPress(code) => match code {
                 KeyCode::Char('l') | KeyCode::Right => self.scroll_right(),
                 KeyCode::Char('h') | KeyCode::Left => self.scroll_left(),
                 KeyCode::Char('j') | KeyCode::Down => self.scroll_down(),
@@ -254,7 +266,35 @@ impl App {
                 KeyCode::BackTab => self.prev_tab(),
                 _ => {}
             },
-            KeyboardMessage::Quit => self.quit(),
+            InputMessage::MouseScroll { direction } => match direction {
+                MouseScrollDirection::Up => self.scroll_up(),
+                MouseScrollDirection::Down => self.scroll_down(),
+                MouseScrollDirection::Left => self.scroll_left(),
+                MouseScrollDirection::Right => self.scroll_right(),
+            },
+            InputMessage::MouseMoved { position } => self.handle_mouse_moved(*position),
+            InputMessage::Quit => self.quit(),
+        }
+    }
+
+    fn handle_mouse_moved(&mut self, position: (u16, u16)) {
+        if is_within_rect(
+            position,
+            &self
+                .layout_clone
+                .main_layout
+                .cpu_plus_memory_layout
+                .cpu_layout,
+        ) {
+            self.selected_tab = SelectedTab::Cpu;
+        } else if is_within_rect(position, &self.layout_clone.main_layout.processes_layout) {
+            self.selected_tab = SelectedTab::Processes;
+        } else if is_within_rect(position, &self.layout_clone.main_layout.disk_layout) {
+            self.selected_tab = SelectedTab::Disks;
+        } else if is_within_rect(position, &self.layout_clone.main_layout.network_layout) {
+            self.selected_tab = SelectedTab::Networks;
+        } else {
+            self.selected_tab = SelectedTab::None;
         }
     }
 
@@ -317,10 +357,11 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame, sys: &System) {
-        let app_layout = prepare_layout(frame);
+        let layout = prepare_layout(frame);
+        self.layout_clone = layout.clone();
 
-        self.render_main_layout(frame, sys, &app_layout);
-        self.render_footer(frame, app_layout.footer_area);
+        self.render_main_layout(frame, sys, &layout);
+        self.render_footer(frame, &layout.footer_area);
     }
 
     fn render_main_layout(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
@@ -440,34 +481,62 @@ impl App {
         );
     }
 
-    fn render_footer(&self, frame: &mut Frame, footer_area: Rect) {
+    fn render_footer(&self, frame: &mut Frame, footer_area: &Rect) {
         let footer = Block::default()
             .title(
                 "Press Tab for next tab, Shift + Tab for previous tab | Press ◄ ▼ ▲ ► or h j k l to scroll | Press q to quit",
             )
             .title_alignment(Alignment::Center);
-        frame.render_widget(footer, footer_area);
+        frame.render_widget(footer, *footer_area);
     }
 }
 
-async fn read_input_events(tx: Sender<KeyboardMessage>) {
+async fn read_input_events(tx: Sender<InputMessage>) {
     loop {
-        if let Result::Ok(Event::Key(key)) = event::read() {
-            if key.kind == KeyEventKind::Press {
-                let msg = match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => KeyboardMessage::Quit,
-                    KeyCode::Char('c') => {
-                        if key.modifiers == KeyModifiers::CONTROL {
-                            KeyboardMessage::Quit
-                        } else {
-                            KeyboardMessage::KeyPress(key.code)
+        if let Result::Ok(event) = event::read() {
+            match event {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Press {
+                        let msg = match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => InputMessage::Quit,
+                            KeyCode::Char('c') => {
+                                if key.modifiers == KeyModifiers::CONTROL {
+                                    InputMessage::Quit
+                                } else {
+                                    InputMessage::KeyPress(key.code)
+                                }
+                            }
+                            code => InputMessage::KeyPress(code),
+                        };
+                        if tx.send(msg).await.is_err() {
+                            return;
                         }
                     }
-                    code => KeyboardMessage::KeyPress(code),
-                };
-                if tx.send(msg).await.is_err() {
-                    return;
                 }
+                Event::Mouse(mouse) => {
+                    let msg = match mouse.kind {
+                        event::MouseEventKind::ScrollDown => InputMessage::MouseScroll {
+                            direction: MouseScrollDirection::Down,
+                        },
+                        event::MouseEventKind::ScrollUp => InputMessage::MouseScroll {
+                            direction: MouseScrollDirection::Up,
+                        },
+                        event::MouseEventKind::ScrollLeft => InputMessage::MouseScroll {
+                            direction: MouseScrollDirection::Left,
+                        },
+                        event::MouseEventKind::ScrollRight => InputMessage::MouseScroll {
+                            direction: MouseScrollDirection::Right,
+                        },
+                        event::MouseEventKind::Moved => InputMessage::MouseMoved {
+                            position: (mouse.column, mouse.row),
+                        },
+                        _ => continue,
+                    };
+                    if tx.send(msg).await.is_err() {
+                        return;
+                    }
+                }
+                _ => {}
             }
         }
     }
