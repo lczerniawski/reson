@@ -19,13 +19,37 @@ The name "Reson" is derived from combining the words "resource" and "monitor."
 - **Disk Usage:** Displays disk usage details and sorts disks by usage. Supports vertical scrolling.
 - **Network Widget:** Displays network throughput and packet counts along with other network details. Supports vertical scrolling.
 - **Keyboard Navigation:**
-  • Use arrow keys (or h/j/k/l) to scroll the active widget.
-  • Press Tab/Shift+Tab to switch between tabs (CPU, Processes, Disks, Networks).
-  • Press `q` or `Esc` (or Ctrl+c) to quit the application.
+  - Use arrow keys (or h/j/k/l) to scroll the active widget.
+  - Press Tab/Shift+Tab to switch between tabs (CPU, Processes, Disks, Networks).
+  - Press `q` or `Esc` (or Ctrl+c) to quit the application.
 - **Responsive Layout:** Automatic layout update based on terminal size.
+- **Mouse Support:**
+  - Move mouse on tabs to switch between them.
+  - Scroll to scroll within widgets.
+- **Process Sorting**
 
-## To Do
-- [ ] Add multiple filter support
+## Process Sorting
+
+The process table features comprehensive sorting capabilities:
+
+**Available Sort Criteria:**
+- **1:** Username - Sort by process owner
+- **2:** PID - Sort by Process ID
+- **3:** PPID - Sort by Parent Process ID
+- **4:** CPU Usage - Sort by processor utilization
+- **5:** Memory Usage - Sort by RAM consumption
+- **6:** Start Time - Sort by process launch time
+- **7:** Process Name - Sort alphabetically by name
+
+**How to Sort:**
+1. Navigate to the Processes tab
+2. Press the number key (1-7) corresponding to your desired sort criterion
+3. Each keypress cycles through the sort states:
+   - First press: Ascending order (▲)
+   - Second press: Descending order (▼)
+   - Third press: Returns to unsorted state
+
+The current sort criterion and direction are indicated in the column header with an arrow symbol.
 
 ## Installation
 TODO

@@ -308,21 +308,16 @@ impl App {
     }
 
     fn toggle_sort_column(&mut self, column: ProcessColumn) {
-        // Toggle through: None -> Ascending -> Descending -> None
         match &self.process_sort_state {
-            Some((current_column, direction)) if *current_column == column => {
-                // If column is already sorted, toggle direction or remove sort
-                match direction {
-                    SortDirection::Ascending => {
-                        self.process_sort_state = Some((column, SortDirection::Descending));
-                    }
-                    SortDirection::Descending => {
-                        self.process_sort_state = None;
-                    }
+            Some((current_column, direction)) if *current_column == column => match direction {
+                SortDirection::Ascending => {
+                    self.process_sort_state = Some((column, SortDirection::Descending));
                 }
-            }
+                SortDirection::Descending => {
+                    self.process_sort_state = None;
+                }
+            },
             _ => {
-                // If column is not sorted yet or different column, start with ascending
                 self.process_sort_state = Some((column, SortDirection::Ascending));
             }
         }
