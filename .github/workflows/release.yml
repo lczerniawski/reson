@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Needed to check tags
 
@@ -64,70 +64,159 @@ jobs:
     if: needs.check-version.outputs.should_release == 'true'
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
+          # Linux builds
           - os: ubuntu-latest
-            platform: linux
-            extension: ""
+            target: x86_64-unknown-linux-gnu
+            platform: Linux_x86_64
+            rust_target: x86_64-unknown-linux-gnu
+
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            platform: Linux_32-bit
+            rust_target: i686-unknown-linux-gnu
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform: Linux_arm64
+            rust_target: aarch64-unknown-linux-gnu
+
+          - os: ubuntu-latest
+            target: arm-unknown-linux-gnueabi
+            platform: Linux_armv6
+            rust_target: arm-unknown-linux-gnueabi
+
+          # macOS builds
           - os: macos-latest
-            platform: macos
-            extension: ""
+            target: x86_64-apple-darwin
+            platform: Darwin_x86_64
+            rust_target: x86_64-apple-darwin
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: Darwin_arm64
+            rust_target: aarch64-apple-darwin
+
+          # Windows builds
           - os: windows-latest
-            platform: windows
-            extension: ".exe"
+            target: x86_64-pc-windows-msvc
+            platform: Windows_x86_64
+            rust_target: x86_64-pc-windows-msvc
+
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            platform: Windows_32-bit
+            rust_target: i686-pc-windows-msvc
+
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            platform: Windows_arm64
+            rust_target: aarch64-pc-windows-msvc
+
+          - os: windows-latest
+            target: arm-pc-windows-msvc
+            platform: Windows_armv6
+            rust_target: arm-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          target: ${{ matrix.rust_target }}
           profile: minimal
           override: true
+
+      # Install cross-compilation dependencies for Linux
+      - name: Install cross-compilation dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.rust_target != 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+          if [[ "${{ matrix.rust_target }}" == *"arm"* ]]; then
+            sudo apt-get install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi
+          fi
+          if [[ "${{ matrix.rust_target }}" == *"aarch64"* ]]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
 
       - name: Build release binary
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release
+          args: --release --target ${{ matrix.rust_target }}
 
-      - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release
-
-      - name: Prepare binary for upload
-        id: prepare_binary
+      - name: Create distribution directory
+        id: create_dist
         shell: bash
         run: |
           BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
           VERSION=${{ needs.check-version.outputs.version }}
           PLATFORM=${{ matrix.platform }}
-          EXT=${{ matrix.extension }}
 
-          ARTIFACT_NAME="${BINARY_NAME}-${VERSION}-${PLATFORM}${EXT}"
+          # Create dist directory
+          mkdir -p dist
 
-          if [ "$PLATFORM" = "windows" ]; then
-            cp "target/release/${BINARY_NAME}${EXT}" "$ARTIFACT_NAME"
+          # Copy binary with correct extension
+          if [[ "$PLATFORM" == *"Windows"* ]]; then
+            cp "target/${{ matrix.rust_target }}/release/${BINARY_NAME}.exe" "dist/${BINARY_NAME}.exe"
           else
-            cp "target/release/${BINARY_NAME}" "$ARTIFACT_NAME"
+            cp "target/${{ matrix.rust_target }}/release/${BINARY_NAME}" "dist/${BINARY_NAME}"
+            chmod +x "dist/${BINARY_NAME}"
           fi
 
-          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          # Copy README and LICENSE if they exist
+          if [ -f "README.md" ]; then
+            cp "README.md" "dist/"
+          fi
+          if [ -f "LICENSE" ]; then
+            cp "LICENSE" "dist/"
+          fi
 
-      - name: Upload binary as artifact
+          # Create archive name
+          ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
+          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+
+          # Create archive based on platform
+          cd dist
+          if [[ "$PLATFORM" == *"Windows"* ]]; then
+            zip -r "../${ARCHIVE_NAME}.zip" ./*
+          else
+            tar -czf "../${ARCHIVE_NAME}.tar.gz" ./*
+          fi
+          cd ..
+
+          # Show created archive
+          if [[ "$PLATFORM" == *"Windows"* ]]; then
+            ls -la "${ARCHIVE_NAME}.zip"
+          else
+            ls -la "${ARCHIVE_NAME}.tar.gz"
+          fi
+
+      # Upload Windows archives
+      - name: Upload Windows archive
+        if: contains(matrix.platform, 'Windows')
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.prepare_binary.outputs.artifact_name }}
-          path: ${{ steps.prepare_binary.outputs.artifact_name }}
+          name: ${{ steps.create_dist.outputs.archive_name }}.zip
+          path: ${{ steps.create_dist.outputs.archive_name }}.zip
           retention-days: 1
 
-  # Third job: Create the release with all binaries
+      # Upload Linux/macOS archives
+      - name: Upload Linux/macOS archive
+        if: "!contains(matrix.platform, 'Windows')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
+          path: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
+          retention-days: 1
+
+  # Third job: Create the release with all archives
   create-release:
     needs: [check-version, build]
     if: needs.check-version.outputs.should_release == 'true'
@@ -135,13 +224,20 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
       - name: List downloaded artifacts
         run: find . -type f | grep -v "\.git"
+
+      - name: Generate checksums
+        run: |
+          echo "# Checksums for ${{ needs.check-version.outputs.binary_name }} v${{ needs.check-version.outputs.version }}" > checksums.txt
+          echo "" >> checksums.txt
+          find . -name "*.tar.gz" -o -name "*.zip" | sort | xargs sha256sum >> checksums.txt
+          cat checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -152,9 +248,16 @@ jobs:
             Release ${{ needs.check-version.outputs.version }}
 
             Commit message: ${{ github.event.head_commit.message }}
+
+            ## Checksums
+            ```
+            $(cat checksums.txt)
+            ```
           draft: false
           prerelease: false
           files: |
-            **/${{ needs.check-version.outputs.binary_name }}-*
+            **/*.tar.gz
+            **/*.zip
+            checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
