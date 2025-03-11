@@ -12,6 +12,7 @@ pub struct ProcessesTable<'a_> {
     pub max_scroll: usize,
 }
 
+// TODO Add PPID (parent process ID)
 pub fn create_processes_table(
     sys: &System,
     layout_height: usize,
@@ -39,8 +40,10 @@ pub fn create_processes_table(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let header = Row::new(vec!["User", "PID", "CPU%", "MEM(MB)", "Time", "Command"])
-        .style(Style::default().fg(Color::Gray));
+    let header = Row::new(vec![
+        "User", "PID", "PPID", "CPU%", "MEM(MB)", "Time", "Command",
+    ])
+    .style(Style::default().fg(Color::Gray));
 
     let rows: Vec<Row> = processes
         .iter()
@@ -54,6 +57,9 @@ pub fn create_processes_table(
                     .map(|user| user.name().to_string())
                     .unwrap_or_else(|| "unknown".to_string()),
                 process.pid().to_string(),
+                process
+                    .parent()
+                    .map_or("-".to_string(), |ppid| ppid.to_string()),
                 format!("{:.1}", process.cpu_usage()),
                 format!("{}", process.memory() / 1024 / 1024),
                 format!(
