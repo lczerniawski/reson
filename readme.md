@@ -69,6 +69,7 @@ Run the application:
 Once running, you can use the following keys:
 - Use ←/→ or h/l to scroll horizontally (CPU tab).
 - Use ↑/↓ or j/k to scroll vertically (Processes, Disks, Networks).
+- Use 1-7 to change sorting order.
 - Press Tab or Shift+Tab to change the active tab.
 - Press `q` (or Esc) to quit.
 
