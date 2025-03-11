@@ -10,10 +10,10 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag_version: ${{ steps.version.outputs.tag_version }}
-      binary_name: ${{ steps.binary.outputs.name }}
-      should_release: ${{ steps.tag_check.outputs.should_release }}
+      version: ${{ steps.set_vars.outputs.version }}
+      tag_version: ${{ steps.set_vars.outputs.tag_version }}
+      binary_name: ${{ steps.set_vars.outputs.binary_name }}
+      should_release: ${{ steps.set_vars.outputs.should_release }}
 
     steps:
       - name: Checkout code
@@ -21,42 +21,39 @@ jobs:
         with:
           fetch-depth: 0 # Needed to check tags
 
-      - name: Get version from Cargo.toml
-        id: version
+      - name: Set output variables
+        id: set_vars
         run: |
           # Extract version from Cargo.toml
           VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
           echo "Version from Cargo.toml: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag_version=v$VERSION" >> $GITHUB_OUTPUT
+          TAG_VERSION="v${VERSION}"
 
-      - name: Get binary name from Cargo.toml
-        id: binary
-        run: |
           # Extract binary name from Cargo.toml
           BINARY_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
           echo "Binary name: $BINARY_NAME"
-          echo "name=$BINARY_NAME" >> $GITHUB_OUTPUT
 
-      - name: Check if tag exists
-        id: tag_check
-        run: |
-          TAG_VERSION="v$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
+          # Check if tag exists
           if git rev-parse "refs/tags/$TAG_VERSION" >/dev/null 2>&1; then
             echo "Tag $TAG_VERSION already exists, not creating a release."
-            echo "should_release=false" >> $GITHUB_OUTPUT
+            SHOULD_RELEASE="false"
           else
             echo "Tag $TAG_VERSION does not exist, proceeding with release."
-            echo "should_release=true" >> $GITHUB_OUTPUT
+            SHOULD_RELEASE="true"
           fi
 
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_version=${TAG_VERSION}" >> $GITHUB_OUTPUT
+          echo "binary_name=${BINARY_NAME}" >> $GITHUB_OUTPUT
+          echo "should_release=${SHOULD_RELEASE}" >> $GITHUB_OUTPUT
+
       - name: Create Release Tag
-        if: steps.tag_check.outputs.should_release == 'true'
+        if: steps.set_vars.outputs.should_release == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git tag -a ${{ steps.version.outputs.tag_version }} -m "Release ${{ steps.version.outputs.tag_version }}"
-          git push origin ${{ steps.version.outputs.tag_version }}
+          git tag -a ${{ steps.set_vars.outputs.tag_version }} -m "Release ${{ steps.set_vars.outputs.tag_version }}"
+          git push origin ${{ steps.set_vars.outputs.tag_version }}
 
   # Build for selected platforms (Windows x64, Linux x64, macOS x64/ARM64)
   build-standard:
@@ -103,6 +100,12 @@ jobs:
           profile: minimal
           override: true
 
+      # Install zip on Windows
+      - name: Install zip on Windows
+        if: contains(matrix.platform, 'Windows')
+        run: |
+          choco install zip -y
+
       # Building for the specified target
       - name: Build release binary
         uses: actions-rs/cargo@v1
@@ -112,8 +115,6 @@ jobs:
 
       # Create distribution package
       - name: Create distribution directory
-        id: create_dist
-        shell: bash
         run: |
           BINARY_NAME=${{ needs.check-version.outputs.binary_name }}
           VERSION=${{ needs.check-version.outputs.version }}
@@ -137,6 +138,8 @@ jobs:
           # Copy README and LICENSE if they exist
           if [ -f "README.md" ]; then
             cp "README.md" "dist/"
+          elif [ -f "readme.md" ]; then
+            cp "readme.md" "dist/"
           fi
           if [ -f "LICENSE" ]; then
             cp "LICENSE" "dist/"
@@ -144,34 +147,27 @@ jobs:
 
           # Create archive name
           ARCHIVE_NAME="${BINARY_NAME}_${VERSION}_${PLATFORM}"
-          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_ENV
 
           # Create archive based on platform
           cd dist
           if [[ "$PLATFORM" == *"Windows"* ]]; then
-            powershell -Command "Compress-Archive -Path * -DestinationPath \"../${ARCHIVE_NAME}.zip\""
+            zip -r "../${ARCHIVE_NAME}.zip" ./*
           else
             tar -czf "../${ARCHIVE_NAME}.tar.gz" ./*
           fi
           cd ..
+        shell: bash
 
-      # Upload Windows archives
-      - name: Upload Windows archive
-        if: contains(matrix.platform, 'Windows')
+      # Upload archives as artifacts
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.create_dist.outputs.archive_name }}.zip
-          path: ${{ steps.create_dist.outputs.archive_name }}.zip
-          retention-days: 1
-
-      # Upload Linux/macOS archives
-      - name: Upload Linux/macOS archive
-        if: "!contains(matrix.platform, 'Windows')"
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
-          path: ${{ steps.create_dist.outputs.archive_name }}.tar.gz
-          retention-days: 1
+          name: ${{ env.archive_name }}
+          path: |
+            ${{ env.archive_name }}.zip
+            ${{ env.archive_name }}.tar.gz
+          if-no-files-found: error
 
   # Create the release with all archives
   create-release:
@@ -185,16 +181,22 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
 
-      - name: List downloaded artifacts
-        run: find . -type f | grep -v "\.git"
+      - name: Move archives to root directory
+        run: |
+          mkdir -p ./releases
+          find ./artifacts -name "*.zip" -o -name "*.tar.gz" | xargs -I{} cp {} ./releases/
+          ls -la ./releases
 
       - name: Generate checksums
         run: |
-          echo "# Checksums for ${{ needs.check-version.outputs.binary_name }} v${{ needs.check-version.outputs.version }}" > checksums.txt
-          echo "" >> checksums.txt
-          find . -name "*.tar.gz" -o -name "*.zip" | sort | xargs sha256sum >> checksums.txt
-          cat checksums.txt
+          cd ./releases
+          echo "# Checksums for ${{ needs.check-version.outputs.binary_name }} v${{ needs.check-version.outputs.version }}" > ../checksums.txt
+          echo "" >> ../checksums.txt
+          sha256sum *.tar.gz *.zip >> ../checksums.txt
+          cat ../checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -213,8 +215,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            **/*.tar.gz
-            **/*.zip
-            checksums.txt
+            ./releases/*.tar.gz
+            ./releases/*.zip
+            ./checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
