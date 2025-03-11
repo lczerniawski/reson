@@ -83,7 +83,7 @@ jobs:
 
           # Linux x64 build
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-msul
+            target: x86_64-unknown-linux-musl
             platform: Linux_x86_64
             extension: ""
 
