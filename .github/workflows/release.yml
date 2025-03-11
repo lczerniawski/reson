@@ -1,0 +1,85 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Get version from Cargo.toml
+        id: version
+        run: |
+          # Extract version from Cargo.toml
+          VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Version from Cargo.toml: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG_VERSION=v$VERSION" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        id: tag_check
+        run: |
+          if git rev-parse "refs/tags/$TAG_VERSION" >/dev/null 2>&1; then
+            echo "Tag $TAG_VERSION already exists, not creating a release."
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "Tag $TAG_VERSION does not exist, proceeding with release."
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build release binary
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release
+
+      - name: Get binary name from Cargo.toml
+        id: binary_name
+        run: |
+          # Extract binary name from Cargo.toml (assuming it's the package name)
+          BINARY_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
+          echo "Binary name: $BINARY_NAME"
+          echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
+
+      - name: Create Release Tag
+        if: env.TAG_EXISTS == 'false'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a $TAG_VERSION -m "Release $TAG_VERSION"
+          git push origin $TAG_VERSION
+
+      - name: Create GitHub Release
+        if: env.TAG_EXISTS == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG_VERSION }}
+          name: Release ${{ env.VERSION }}
+          body: |
+            Release ${{ env.VERSION }}
+
+            Commit message: ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
+          files: |
+            target/release/${{ env.BINARY_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
