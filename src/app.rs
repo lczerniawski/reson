@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{Block, ScrollbarState},
     Frame, Terminal,
 };
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 use tokio::{sync::mpsc::Sender, time::interval};
 
 use crate::memory::create_memory_gauges;
@@ -145,6 +145,7 @@ impl HorizontalScrollbarState {
     }
 }
 
+#[derive(Clone)]
 struct VerticalScrollbarState {
     state: ScrollbarState,
     pos: usize,
@@ -235,6 +236,8 @@ impl App {
         mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         sys: &mut System,
+        disks: &mut sysinfo::Disks,
+        networks: &mut sysinfo::Networks,
     ) -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<InputMessage>(10);
 
@@ -246,9 +249,11 @@ impl App {
             tokio::select! {
                 _ = refresh_ticker.tick() => {
                     sys.refresh_all();
+                    disks.refresh(true);
+                    networks.refresh(true);
                 }
                 _ = draw_ticker.tick() => {
-                    terminal.draw(|frame| self.draw(frame, sys))?;
+                    terminal.draw(|frame| self.draw(frame, sys, disks, networks))?;
                 }
                 Some(message) = rx.recv() => {
                     self.handle_events(&message);
@@ -402,28 +407,45 @@ impl App {
         self.state = AppState::Exiting;
     }
 
-    fn draw(&mut self, frame: &mut Frame, sys: &System) {
+    fn draw(
+        &mut self,
+        frame: &mut Frame,
+        sys: &System,
+        disks: &sysinfo::Disks,
+        networks: &sysinfo::Networks,
+    ) {
         let layout = prepare_layout(frame);
         self.layout_clone = layout.clone();
 
-        self.render_main_layout(frame, sys, &layout);
-        self.render_footer(frame, &layout.footer_area);
-    }
+        // Move scrollbar state to local variables
+        let mut disks_scrollbar_state = self.disks_scrollbar_state.clone();
+        let mut networks_scrollbar_state = self.networks_scrollbar_state.clone();
 
-    fn render_main_layout(&mut self, frame: &mut Frame, sys: &System, app_layout: &AppLayout) {
         self.render_cpu(
             frame,
             sys,
-            &app_layout.main_layout.cpu_plus_memory_layout.cpu_layout,
+            &layout.main_layout.cpu_plus_memory_layout.cpu_layout,
         );
         self.render_memory_gauges(
             frame,
             sys,
-            &app_layout.main_layout.cpu_plus_memory_layout.memory_layout,
+            &layout.main_layout.cpu_plus_memory_layout.memory_layout,
         );
-        self.render_processes(frame, sys, &app_layout.main_layout.processes_layout);
-        self.render_disks(frame, sys, &app_layout.main_layout.disk_layout);
-        self.render_networks(frame, sys, &app_layout.main_layout.network_layout);
+        self.render_processes(frame, sys, &layout.main_layout.processes_layout);
+        self.render_disks(
+            frame,
+            disks,
+            &layout.main_layout.disk_layout,
+            &mut disks_scrollbar_state,
+        );
+        self.render_networks(
+            frame,
+            networks,
+            &layout.main_layout.network_layout,
+            &mut networks_scrollbar_state,
+        );
+
+        self.render_footer(frame, &layout.footer_area);
     }
 
     fn render_cpu(&mut self, frame: &mut Frame, sys: &System, cpu_layout: &Rect) {
@@ -486,45 +508,55 @@ impl App {
         );
     }
 
-    fn render_disks(&mut self, frame: &mut Frame, sys: &System, disks_layout: &Rect) {
+    fn render_disks(
+        &self,
+        frame: &mut Frame,
+        disks: &sysinfo::Disks,
+        disks_layout: &Rect,
+        disks_scrollbar_state: &mut VerticalScrollbarState,
+    ) {
         let is_selected = self.selected_tab.is_disks();
         let disk_widget = create_disks_widget(
-            sys,
+            disks,
             disks_layout.height.into(),
             self.disks_scrollbar_state.pos,
             is_selected,
         );
         frame.render_widget(disk_widget.chart, *disks_layout);
 
-        self.disks_scrollbar_state
-            .set_values(disk_widget.max_scroll);
-        self.processes_scrollbar_state.current_pos_scroll_update();
+        disks_scrollbar_state.set_values(disk_widget.max_scroll);
+        disks_scrollbar_state.current_pos_scroll_update();
 
         frame.render_stateful_widget(
             get_vertical_scrollbar(),
             *disks_layout,
-            &mut self.disks_scrollbar_state.state,
+            &mut disks_scrollbar_state.state,
         );
     }
 
-    fn render_networks(&mut self, frame: &mut Frame, sys: &System, network_layout: &Rect) {
+    fn render_networks(
+        &self,
+        frame: &mut Frame,
+        networks: &sysinfo::Networks,
+        network_layout: &Rect,
+        networks_scrollbar_state: &mut VerticalScrollbarState,
+    ) {
         let is_selected = self.selected_tab.is_network();
         let network_widget = create_networks_widget(
-            sys,
+            networks,
             network_layout.height.into(),
             self.networks_scrollbar_state.pos,
             is_selected,
         );
         frame.render_widget(network_widget.chart, *network_layout);
 
-        self.networks_scrollbar_state
-            .set_values(network_widget.max_scroll);
-        self.networks_scrollbar_state.current_pos_scroll_update();
+        networks_scrollbar_state.set_values(network_widget.max_scroll);
+        networks_scrollbar_state.current_pos_scroll_update();
 
         frame.render_stateful_widget(
             get_vertical_scrollbar(),
             *network_layout,
-            &mut self.networks_scrollbar_state.state,
+            &mut networks_scrollbar_state.state,
         );
     }
 

@@ -1,4 +1,4 @@
-use sysinfo::{NetworkExt, NetworksExt, System, SystemExt};
+use sysinfo::Networks;
 
 use ratatui::{
     style::{Color, Style},
@@ -28,7 +28,7 @@ fn format_bytes_per_second(bytes: u64) -> String {
 }
 
 pub fn create_networks_widget(
-    sys: &System,
+    networks: &Networks,
     layout_height: usize,
     scroll_position: usize,
     is_selected: bool,
@@ -37,23 +37,20 @@ pub fn create_networks_widget(
     let visible_lines = layout_height - 2;
     let highlight_style = get_highlight_style(is_selected);
 
-    let mut networks: Vec<_> = sys.networks().iter().collect();
-    networks.sort_by(|a, b| {
+    let mut network_vec: Vec<_> = networks.iter().collect();
+    network_vec.sort_by(|a, b| {
         let a_transmited = a.1.transmitted();
         let b_transmited = b.1.transmitted();
-
         let a_received = a.1.received();
         let b_received = b.1.received();
-
         let a_combined = a_transmited + a_received;
         let b_combined = b_transmited + b_received;
-
         b_combined
             .partial_cmp(&a_combined)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let network_text = networks
+    let network_text = network_vec
         .iter()
         .map(|(network, data)| {
             format!(
@@ -62,14 +59,14 @@ pub fn create_networks_widget(
                 format_bytes_per_second(data.transmitted()),
                 format_bytes_per_second(data.received()),
                 data.packets_transmitted(),
-                data.packets_transmitted(),
+                data.packets_received(),
                 data.mac_address()
             )
         })
         .collect::<Vec<String>>()
         .join("\n");
 
-    let total_stats = sys.networks().iter().fold(
+    let total_stats = network_vec.iter().fold(
         TotalNetworkStats {
             transmited_bytes: 0,
             received_bytes: 0,
@@ -93,7 +90,7 @@ pub fn create_networks_widget(
         total_stats.received_packets
     );
 
-    let all_lines_count = networks.len();
+    let all_lines_count = network_vec.len();
     let max_scroll = all_lines_count.saturating_sub(visible_lines);
     let paragraph = Paragraph::new(network_text)
         .block(

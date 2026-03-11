@@ -6,12 +6,14 @@ use crossterm::{
 };
 use ratatui::{prelude::CrosstermBackend, Terminal};
 use reson::App;
-use sysinfo::{System, SystemExt};
+use sysinfo::{Disks, Networks, System};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let mut sys = System::new_all();
+    let mut disks = Disks::new();
+    let mut networks = Networks::new();
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -20,7 +22,9 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    App::new().run(&mut terminal, &mut sys).await?;
+    App::new()
+        .run(&mut terminal, &mut sys, &mut disks, &mut networks)
+        .await?;
 
     disable_raw_mode()?;
     terminal.backend_mut().execute(LeaveAlternateScreen)?;

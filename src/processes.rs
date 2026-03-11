@@ -3,7 +3,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Block, Borders, Row, Table},
 };
-use sysinfo::{ProcessExt, System, SystemExt, UserExt};
+use sysinfo::System;
 
 use crate::layout::get_highlight_style;
 
@@ -48,16 +48,12 @@ pub fn create_processes_table(
             processes.sort_by(|a, b| {
                 let a_user = a
                     .user_id()
-                    .and_then(|id| sys.get_user_by_id(&id))
-                    .map(|user| user.name().to_string())
+                    .map(|id| id.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
-
                 let b_user = b
                     .user_id()
-                    .and_then(|id| sys.get_user_by_id(&id))
-                    .map(|user| user.name().to_string())
+                    .map(|id| id.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
-
                 match direction {
                     SortDirection::Ascending => a_user.cmp(&b_user),
                     SortDirection::Descending => b_user.cmp(&a_user),
@@ -186,8 +182,7 @@ pub fn create_processes_table(
             Row::new(vec![
                 process
                     .user_id()
-                    .and_then(|id| sys.get_user_by_id(&id))
-                    .map(|user| user.name().to_string())
+                    .map(|id| id.to_string())
                     .unwrap_or_else(|| "unknown".to_string()),
                 process.pid().to_string(),
                 process
@@ -201,25 +196,16 @@ pub fn create_processes_table(
                     process.run_time() / 60 % 60,
                     process.run_time() % 60
                 ),
-                process.name().to_string(),
+                process.name().to_string_lossy().to_string(),
             ])
         })
         .collect();
 
     let all_lines_count = processes.len();
     let max_scroll = all_lines_count.saturating_sub(visible_lines);
-    let table = Table::new(rows)
-        .header(header)
-        .block(
-            Block::default()
-                .title(format!("Processes ({})", all_lines_count))
-                .title_style(highlight_style.title)
-                .borders(Borders::all())
-                .border_style(highlight_style.border)
-                .border_type(highlight_style.border_type),
-        )
-        .style(Style::default().fg(Color::Cyan))
-        .widths(&[
+    let table = Table::new(
+        rows,
+        &[
             Constraint::Percentage(15), // User
             Constraint::Percentage(10), // PID
             Constraint::Percentage(10), // PPID
@@ -227,8 +213,28 @@ pub fn create_processes_table(
             Constraint::Percentage(10), // MEM
             Constraint::Percentage(15), // Time
             Constraint::Percentage(40), // Command
-        ])
-        .column_spacing(1);
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .title(format!("Processes ({})", all_lines_count))
+            .title_style(highlight_style.title)
+            .borders(Borders::all())
+            .border_style(highlight_style.border)
+            .border_type(highlight_style.border_type),
+    )
+    .style(Style::default().fg(Color::Cyan))
+    .widths(&[
+        Constraint::Percentage(15), // User
+        Constraint::Percentage(10), // PID
+        Constraint::Percentage(10), // PPID
+        Constraint::Percentage(10), // CPU%
+        Constraint::Percentage(10), // MEM
+        Constraint::Percentage(15), // Time
+        Constraint::Percentage(40), // Command
+    ])
+    .column_spacing(1);
 
     ProcessesTable {
         chart: table,

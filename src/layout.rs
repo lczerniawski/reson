@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     widgets::{BorderType, Scrollbar, ScrollbarOrientation},
 };
 
@@ -55,7 +55,7 @@ pub fn prepare_layout(f: &mut ratatui::Frame<'_>) -> AppLayout {
     let app_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Min(0), Length(1)])
-        .split(f.size());
+        .split(f.area());
 
     let main_area = app_layout[0];
     let footer_area = app_layout[1];

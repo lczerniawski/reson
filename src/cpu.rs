@@ -3,7 +3,7 @@ use ratatui::{
     text::Line,
     widgets::{Bar, BarChart, BarGroup, Block, Borders},
 };
-use sysinfo::{CpuExt, System, SystemExt};
+use sysinfo::System;
 
 use crate::layout::get_highlight_style;
 
@@ -24,21 +24,14 @@ pub fn create_cpu_barchart(
     let visible_bars = layout_width / (bar_width + bar_gap) as usize;
     let highlight_style = get_highlight_style(is_selected);
 
-    let cpu_data: Vec<Bar> = sys
-        .cpus()
-        .iter()
-        .enumerate()
-        .skip(scroll_position)
-        .take(visible_bars)
-        .map(|(cpu_count, cpu)| {
-            let cpu_usage = cpu.cpu_usage() as u64;
-            Bar::default()
-                .value(cpu_usage)
-                .label(Line::from(format!("CPU {}", cpu_count + 1)))
-                .text_value(format!("{cpu_usage:>3}%"))
-                .value_style(Style::default().fg(Color::Black).bg(Color::Green))
-        })
-        .collect();
+    let cpu_data: Vec<Bar> = sys.cpus().iter().enumerate().skip(scroll_position).take(visible_bars).map(|(cpu_count, cpu)| {
+        let cpu_usage = cpu.cpu_usage() as u64;
+        Bar::default()
+            .value(cpu_usage)
+            .label(Line::from(format!("CPU {}", cpu_count + 1)))
+            .text_value(format!("{cpu_usage:>3}%"))
+            .value_style(Style::default().fg(Color::Black).bg(Color::Green))
+    }).collect();
 
     let all_bar_count = sys.cpus().len();
     let max_scroll = all_bar_count.saturating_sub(visible_bars as usize);
@@ -52,9 +45,8 @@ pub fn create_cpu_barchart(
         .block(
             Block::default()
                 .title(format!(
-                    "CPU Usage, Total: {}%, Max Frequency: {} MHz",
-                    sys.global_cpu_info().cpu_usage().round(),
-                    sys.global_cpu_info().frequency()
+                    "CPU Usage, Total: {}%",
+                    sys.global_cpu_usage().round()
                 ))
                 .title_style(highlight_style.title)
                 .borders(Borders::all())

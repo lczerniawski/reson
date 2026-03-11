@@ -2,20 +2,20 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Block, Borders, Gauge},
 };
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 
 pub struct MemoryGauges<'a> {
     pub ram_gauge: Gauge<'a>,
     pub swap_gauge: Gauge<'a>,
 }
 
-pub fn create_memory_gauges(sys: &System) -> MemoryGauges {
+pub fn create_memory_gauges<'a>(sys: &System) -> MemoryGauges<'a> {
     let total_memory_gb = sys.total_memory() as f64 / 1024.0 / 1024.0;
     let used_memory_gb = sys.used_memory() as f64 / 1024.0 / 1024.0;
     let memory_percentage = (used_memory_gb / total_memory_gb) * 100.0;
 
     let total_swap_gb = sys.total_swap() as f64 / 1024.0 / 1024.0;
-    let used_swap_gb = sys.used_swap() as f64 / 1024.0 / 1024.;
+    let used_swap_gb = sys.used_swap() as f64 / 1024.0 / 1024.0;
     let swap_percentage = (used_swap_gb / total_swap_gb) * 100.0;
 
     let memory_gauge = Gauge::default()

@@ -12,9 +12,9 @@ name = "reson"
 path = "src/lib.rs"
 
 [dependencies]
-sysinfo = "0.29.0"
-ratatui = "0.24.0"
-crossterm = "0.27"
+sysinfo = "0.38.4"
+ratatui = "0.30.0"
+crossterm = "0.29"
 color-eyre = "0.6"
-strum = { version = "0.26", features = ["derive"] }
-tokio = { version = "1.43", features = ["full"] }
+strum = { version = "0.28", features = ["derive"] }
+tokio = { version = "1.50", features = ["full"] }
